@@ -6,9 +6,16 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class AiConfig {
     private String provider;
     private Ollama ollama = new Ollama();
-    private OpenAi openai = new OpenAi();
     private Gemini gemini = new Gemini();
     private GoogleTranslate googletranslate = new GoogleTranslate();
+
+    public Gemini getGemini() {
+        return gemini;
+    }
+
+    public void setGemini(Gemini gemini) {
+        this.gemini = gemini;
+    }
 
     public GoogleTranslate getGoogletranslate() {
         return googletranslate;
@@ -34,25 +41,10 @@ public class AiConfig {
         this.ollama = ollama;
     }
 
-    public OpenAi getOpenai() {
-        return openai;
-    }
-
-    public void setOpenai(OpenAi openai) {
-        this.openai = openai;
-    }
-
-    public Gemini getGemini() {
-        return gemini;
-    }
-
-    public void setGemini(Gemini gemini) {
-        this.gemini = gemini;
-    }
-
     public static class Ollama {
         private String url;
         private String model;
+        private Double temperature;
 
         public String getUrl() {
             return url;
@@ -69,26 +61,13 @@ public class AiConfig {
         public void setModel(String model) {
             this.model = model;
         }
-    }
 
-    public static class OpenAi {
-        private String apiKey;
-        private String model;
-
-        public String getApiKey() {
-            return apiKey;
+        public Double getTemperature() {
+            return temperature;
         }
 
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
+        public void setTemperature(Double temperature) {
+            this.temperature = temperature;
         }
     }
 

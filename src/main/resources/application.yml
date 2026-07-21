@@ -3,16 +3,13 @@ app:
   gui: true
 
 server:
-  port: 0
+  port: 8080
 
 ai:
   provider: ollama
   ollama:
     url: http://localhost:11434
     model: gemma2:2b
-  openai:
-    apiKey: ${OPENAI_API_KEY:}
-    model: gpt-4o-mini
   gemini:
     apiKey: ${GEMINI_API_KEY:}
     model: gemini-1.5-flash

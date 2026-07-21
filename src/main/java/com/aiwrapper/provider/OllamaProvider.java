@@ -30,8 +30,12 @@ public class OllamaProvider implements AiProvider {
         request.put("prompt", prompt);
         request.put("stream", false);
 
+        Map<String, Object> ollamaOptions = new HashMap<>();
+        if (config.getTemperature() != null) {
+            ollamaOptions.put("temperature", config.getTemperature());
+        }
+
         if (options != null && !options.isEmpty()) {
-            Map<String, Object> ollamaOptions = new HashMap<>();
             if (options.containsKey("temperature")) {
                 ollamaOptions.put("temperature", options.get("temperature"));
             }
@@ -48,9 +52,9 @@ public class OllamaProvider implements AiProvider {
                     ollamaOptions.putAll(rawOptionsMap);
                 }
             }
-            if (!ollamaOptions.isEmpty()) {
-                request.put("options", ollamaOptions);
-            }
+        }
+        if (!ollamaOptions.isEmpty()) {
+            request.put("options", ollamaOptions);
         }
 
         @SuppressWarnings("unchecked")
