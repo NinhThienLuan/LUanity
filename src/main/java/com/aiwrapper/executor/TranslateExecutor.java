@@ -113,7 +113,8 @@ public class TranslateExecutor implements BaseExecutor {
 
         cacheMap.entrySet().removeIf(entry -> isRefusalOrJunk(entry.getValue()));
 
-        if (cacheMap.containsKey(text)) {
+        boolean bypassCache = options != null && Boolean.TRUE.equals(options.get("bypassCache"));
+        if (cacheMap.containsKey(text) && !bypassCache) {
             String cached = cacheMap.get(text);
             if (listener != null) {
                 listener.onTranslation(text, cached, "Cache", text.length());
@@ -252,10 +253,8 @@ public class TranslateExecutor implements BaseExecutor {
         public String restore(String translated) {
             if (translated == null)
                 return null;
-            // Match tag sequence with flexible brackets, asterisks, spacing, and
-            // underscores
             java.util.regex.Pattern pattern = java.util.regex.Pattern
-                    .compile("([\\[\\]\\*_]*\\s*[\\[\\]\\*_]*[tT][aA][gG]\\s*_?\\s*(\\d+)[\\s\\[\\]\\*]*)");
+                    .compile("((?:[\\[\\]\\*_]+\\s*)?[tT][aA][gG]\\s*_?\\s*(\\d+)(?:\\s*[\\[\\]\\*_]+)?)");
             java.util.regex.Matcher matcher = pattern.matcher(translated);
             StringBuilder sb = new StringBuilder();
             while (matcher.find()) {
@@ -673,18 +672,54 @@ public class TranslateExecutor implements BaseExecutor {
         return null;
     }
 
-    private String cleanRawTranslation(String original, String raw) {
+    String cleanRawTranslation(String original, String raw) {
         if (raw == null)
             return null;
         String clean = raw.trim();
+
+        // Remove trailing parenthetical remarks/explanations
+        clean = clean.replaceAll(
+                "\\s*[\\(\\[](?i:this translates|literally|note|meaning|explanation|context|vietnamese|translate|english)[^\\]\\)]*[\\)\\]]\\s*$",
+                "").trim();
 
         String[] prefixes = {
                 "vietnamese:", "tiếng việt:", "tieng viet:", "dịch:", "dich:",
                 "translation:", "vietnamese translation:", "bản dịch:"
         };
-        for (String prefix : prefixes) {
-            if (clean.toLowerCase().startsWith(prefix)) {
-                clean = clean.substring(prefix.length()).trim();
+
+        boolean changed = true;
+        while (changed) {
+            changed = false;
+
+            // Strip quotes and markdown bold/italic wrappers
+            boolean stripped = true;
+            while (stripped) {
+                stripped = false;
+                if (clean.startsWith("**") && clean.endsWith("**") && clean.length() > 3) {
+                    clean = clean.substring(2, clean.length() - 2).trim();
+                    stripped = true;
+                    changed = true;
+                } else if (clean.startsWith("*") && clean.endsWith("*") && clean.length() > 1) {
+                    clean = clean.substring(1, clean.length() - 1).trim();
+                    stripped = true;
+                    changed = true;
+                } else if (clean.startsWith("\"") && clean.endsWith("\"") && clean.length() > 1) {
+                    clean = clean.substring(1, clean.length() - 1).trim();
+                    stripped = true;
+                    changed = true;
+                } else if (clean.startsWith("'") && clean.endsWith("'") && clean.length() > 1) {
+                    clean = clean.substring(1, clean.length() - 1).trim();
+                    stripped = true;
+                    changed = true;
+                }
+            }
+
+            // Strip language/translation labels
+            for (String prefix : prefixes) {
+                if (clean.toLowerCase().startsWith(prefix)) {
+                    clean = clean.substring(prefix.length()).trim();
+                    changed = true;
+                }
             }
         }
 
@@ -719,13 +754,6 @@ public class TranslateExecutor implements BaseExecutor {
                     break;
                 }
             }
-        }
-
-        if (clean.startsWith("\"") && clean.endsWith("\"") && clean.length() > 1) {
-            clean = clean.substring(1, clean.length() - 1).trim();
-        }
-        if (clean.startsWith("'") && clean.endsWith("'") && clean.length() > 1) {
-            clean = clean.substring(1, clean.length() - 1).trim();
         }
 
         return clean;

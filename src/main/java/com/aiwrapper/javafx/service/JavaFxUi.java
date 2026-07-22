@@ -112,11 +112,25 @@ public class JavaFxUi {
                 topStatusBar.updateStats(totalRequests, totalChars, cacheHits, aiHits);
 
                 TranslationItem selected = translationCacheCard.getTableView().getSelectionModel().getSelectedItem();
-                TranslationItem newItem = new TranslationItem(type, original, translated);
-                historyList.add(newItem);
-                if (historyList.size() > 500) {
-                    historyList.remove(0);
+                TranslationItem existingItem = null;
+                for (TranslationItem item : historyList) {
+                    if (item.getOriginal().equals(original)) {
+                        existingItem = item;
+                        break;
+                    }
                 }
+
+                if (existingItem != null) {
+                    existingItem.setType(type);
+                    existingItem.setTranslated(translated);
+                } else {
+                    TranslationItem newItem = new TranslationItem(type, original, translated);
+                    historyList.add(newItem);
+                    if (historyList.size() > 500) {
+                        historyList.remove(0);
+                    }
+                }
+
                 if (selected != null) {
                     translationCacheCard.getTableView().getSelectionModel().select(selected);
                 }

@@ -40,6 +40,14 @@ public class TranslationCacheCard extends VBox {
     private Runnable onCacheFileWiped;
     private Supplier<String> gamePathSupplier;
 
+    private TranslationItem currentItem = null;
+    private javafx.beans.value.ChangeListener<String> activeTranslationListener = null;
+    private boolean isChangingSelection = false;
+    private VBox detailBox;
+    private TextArea txtOriginal;
+    private TextArea txtTranslated;
+    private Label lblWarning;
+
     public TranslationCacheCard(Stage stage, TranslateExecutor translateExecutor,
             ObservableList<TranslationItem> historyList) {
         super(10);
@@ -419,6 +427,41 @@ public class TranslationCacheCard extends VBox {
             }
         });
 
+        MenuItem mntReTranslate = new MenuItem("Dịch lại");
+        mntReTranslate.setOnAction(evt -> {
+            TranslationItem selected = tableView.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                String original = selected.getOriginal();
+                selected.setType("Dịch...");
+                selected.setTranslated("Đang dịch lại...");
+                if (currentItem == selected) {
+                    txtTranslated.setText("Đang dịch lại...");
+                }
+                translateExecutor.translateSingleAsync(original, Map.of("bypassCache", true))
+                        .thenAccept(newTranslation -> {
+                            javafx.application.Platform.runLater(() -> {
+                                selected.setType("AI");
+                                selected.setTranslated(newTranslation);
+                                if (currentItem == selected) {
+                                    txtTranslated.setText(newTranslation);
+                                }
+                                if (onRowChanged != null) {
+                                    onRowChanged.run();
+                                }
+                            });
+                        }).exceptionally(ex -> {
+                            javafx.application.Platform.runLater(() -> {
+                                selected.setType("AI_Error");
+                                selected.setTranslated("[LỖI] " + ex.getMessage());
+                                if (currentItem == selected) {
+                                    txtTranslated.setText("[LỖI] " + ex.getMessage());
+                                }
+                            });
+                            return null;
+                        });
+            }
+        });
+
         MenuItem mntDelete = new MenuItem("Xóa dòng");
         mntDelete.setStyle("-fx-text-fill: #ef4444;");
         mntDelete.setOnAction(evt -> {
@@ -432,7 +475,7 @@ public class TranslationCacheCard extends VBox {
                 }
             }
         });
-        rowMenu.getItems().addAll(mntPin, mntDelete);
+        rowMenu.getItems().addAll(mntPin, mntReTranslate, mntDelete);
 
         tableView.setRowFactory(tv -> {
             TableRow<TranslationItem> row = new TableRow<>();
@@ -464,7 +507,119 @@ public class TranslationCacheCard extends VBox {
         });
         tableView.setItems(filteredData);
 
-        getChildren().addAll(lblZoneCTitle, searchBox, addRowBox, tableView);
+        // Detail Box UI construction
+        detailBox = new VBox(8);
+        detailBox.setPadding(new Insets(10, 0, 10, 0));
+        detailBox.setVisible(false);
+        detailBox.setManaged(false);
+
+        Label lblDetailTitle = new Label("CHI TIẾT VĂN BẢN ĐÃ CHỌN");
+        lblDetailTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 11));
+        lblDetailTitle.setTextFill(javafx.scene.paint.Color.web("#94a3b8"));
+
+        HBox textAreasBox = new HBox(15);
+        VBox.setVgrow(textAreasBox, Priority.ALWAYS);
+
+        VBox origBox = new VBox(5);
+        HBox.setHgrow(origBox, Priority.ALWAYS);
+        Label lblOrig = new Label("Bản gốc (Không thể chỉnh sửa):");
+        lblOrig.setTextFill(javafx.scene.paint.Color.web("#cbd5e1"));
+        lblOrig.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
+        txtOriginal = new TextArea();
+        txtOriginal.setEditable(false);
+        txtOriginal.setWrapText(true);
+        txtOriginal.setPrefHeight(75);
+        txtOriginal.setPromptText("Bản gốc...");
+        txtOriginal.setStyle(
+                "-fx-control-inner-background: #1e293b; -fx-text-fill: #94a3b8; -fx-background-radius: 6; -fx-padding: 2;");
+        origBox.getChildren().addAll(lblOrig, txtOriginal);
+
+        VBox transBox = new VBox(5);
+        HBox.setHgrow(transBox, Priority.ALWAYS);
+        Label lblTrans = new Label("Bản dịch (Có thể sửa trực tiếp):");
+        lblTrans.setTextFill(javafx.scene.paint.Color.web("#cbd5e1"));
+        lblTrans.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 12));
+        txtTranslated = new TextArea();
+        txtTranslated.setEditable(true);
+        txtTranslated.setWrapText(true);
+        txtTranslated.setPrefHeight(75);
+        txtTranslated.setPromptText("Bản dịch...");
+        txtTranslated.setStyle(
+                "-fx-control-inner-background: #1e293b; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 2;");
+        txtTranslated.setOnKeyPressed(evt -> {
+            if (evt.getCode() == javafx.scene.input.KeyCode.ENTER) {
+                if (evt.isShiftDown()) {
+                    txtTranslated.appendText("\n");
+                } else {
+                    evt.consume(); // prevent inserting newline
+                    commitDetailTranslation();
+                }
+            }
+        });
+        transBox.getChildren().addAll(lblTrans, txtTranslated);
+
+        textAreasBox.getChildren().addAll(origBox, transBox);
+
+        lblWarning = new Label();
+        lblWarning.setTextFill(javafx.scene.paint.Color.web("#ef4444"));
+        lblWarning.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+        lblWarning.setWrapText(true);
+        lblWarning.setVisible(false);
+        lblWarning.setManaged(false);
+
+        detailBox.getChildren().addAll(lblDetailTitle, textAreasBox, lblWarning);
+
+        // Selection Property Listener with deselect dirty confirmation guards
+        tableView.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            if (isChangingSelection)
+                return;
+
+            if (newVal != currentItem) {
+                if (currentItem != null && isTranslatedDirty()) {
+                    isChangingSelection = true;
+                    Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                    confirm.setTitle("Thay đổi chưa lưu");
+                    confirm.setHeaderText("Bạn đã chỉnh sửa bản dịch nhưng chưa lưu.");
+                    confirm.setContentText("Bạn có muốn lưu các thay đổi lại trước khi chọn dòng mới không?");
+
+                    ButtonType btnYes = new ButtonType("Có", ButtonBar.ButtonData.YES);
+                    ButtonType btnNo = new ButtonType("Không", ButtonBar.ButtonData.NO);
+                    ButtonType btnCancel = new ButtonType("Hủy", ButtonBar.ButtonData.CANCEL_CLOSE);
+                    confirm.getButtonTypes().setAll(btnYes, btnNo, btnCancel);
+
+                    File cssFile = new File("data/ui_style.css");
+                    if (cssFile.exists()) {
+                        confirm.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                    }
+
+                    Optional<ButtonType> result = confirm.showAndWait();
+                    if (result.isPresent() && result.get() == btnYes) {
+                        if (commitDetailTranslation()) {
+                            switchToNewRow(newVal);
+                        } else {
+                            javafx.application.Platform.runLater(() -> {
+                                tableView.getSelectionModel().select(currentItem);
+                                isChangingSelection = false;
+                            });
+                            return;
+                        }
+                    } else if (result.isPresent() && result.get() == btnNo) {
+                        switchToNewRow(newVal);
+                    } else {
+                        javafx.application.Platform.runLater(() -> {
+                            tableView.getSelectionModel().select(currentItem);
+                            isChangingSelection = false;
+                        });
+                        return;
+                    }
+                    isChangingSelection = false;
+                } else {
+                    switchToNewRow(newVal);
+                }
+            }
+        });
+
+        getChildren().addAll(lblZoneCTitle, searchBox, addRowBox, tableView, detailBox);
     }
 
     public void updateActiveCacheLabel() {
@@ -547,5 +702,75 @@ public class TranslationCacheCard extends VBox {
         btn.setOnMouseExited(e -> btn.setStyle(
                 "-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 8 16; -fx-cursor: hand;"));
         return btn;
+    }
+
+    private boolean isTranslatedDirty() {
+        if (currentItem == null)
+            return false;
+        String cur = txtTranslated.getText();
+        String originalVal = currentItem.getTranslated();
+        return cur != null && !cur.equals(originalVal);
+    }
+
+    private void switchToNewRow(TranslationItem newItem) {
+        // Unbind previous listener
+        if (currentItem != null && activeTranslationListener != null) {
+            currentItem.translatedProperty().removeListener(activeTranslationListener);
+        }
+
+        currentItem = newItem;
+        lblWarning.setVisible(false);
+        lblWarning.setManaged(false);
+
+        if (newItem != null) {
+            txtOriginal.setText(newItem.getOriginal());
+            txtTranslated.setText(newItem.getTranslated());
+            detailBox.setVisible(true);
+            detailBox.setManaged(true);
+
+            // Bind listener to listen for background updates
+            activeTranslationListener = (obsStr, oldStr, newStr) -> {
+                if (newStr != null) {
+                    javafx.application.Platform.runLater(() -> {
+                        if (!txtTranslated.isFocused() || !isTranslatedDirty()) {
+                            txtTranslated.setText(newStr);
+                        } else {
+                            lblWarning.setText("⚠️ Bản dịch gốc vừa được server cập nhật ở nền: " + newStr);
+                            lblWarning.setVisible(true);
+                            lblWarning.setManaged(true);
+                        }
+                    });
+                }
+            };
+            newItem.translatedProperty().addListener(activeTranslationListener);
+        } else {
+            txtOriginal.clear();
+            txtTranslated.clear();
+            detailBox.setVisible(false);
+            detailBox.setManaged(false);
+        }
+    }
+
+    private boolean commitDetailTranslation() {
+        if (currentItem == null)
+            return false;
+        String newTrans = txtTranslated.getText().trim();
+        if (newTrans.isEmpty()) {
+            Alert alert = new Alert(Alert.AlertType.WARNING, "Bản dịch không được để trống!");
+            File cssFile = new File("data/ui_style.css");
+            if (cssFile.exists()) {
+                alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+            }
+            alert.showAndWait();
+            return false;
+        }
+        currentItem.setTranslated(newTrans);
+        translateExecutor.updateCacheValue(currentItem.getOriginal(), newTrans);
+        lblWarning.setVisible(false);
+        lblWarning.setManaged(false);
+        if (onRowChanged != null) {
+            onRowChanged.run();
+        }
+        return true;
     }
 }

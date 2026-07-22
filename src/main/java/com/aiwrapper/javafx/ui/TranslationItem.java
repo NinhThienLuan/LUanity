@@ -41,4 +41,8 @@ public class TranslationItem {
     public void setTranslated(String translated) {
         this.translated.set(translated);
     }
+
+    public void setType(String type) {
+        this.type.set(type);
+    }
 }

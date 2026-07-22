@@ -136,4 +136,30 @@ public class TagPreservationTest {
         assertEquals("Bắt đầu", loaded.get("Start Game"));
         assertEquals("Cài đặt", loaded.get("Settings"));
     }
+
+    @Test
+    public void testCleanRawTranslation() {
+        TranslateExecutor executor = new TranslateExecutor(null);
+
+        // Test markdown wrapper stripping
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "**Tôi sẽ kể**"));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "  **  Tôi sẽ kể  **  "));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "\"Tôi sẽ kể\""));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "**\"Tôi sẽ kể\"**"));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "\"**Tôi sẽ kể**\""));
+
+        // Test parenthetical notes and explanations
+        assertEquals("Tôi sẽ kể cho quái vật biển", executor.cleanRawTranslation("Original",
+                "Tôi sẽ kể cho quái vật biển (This translates directly to \"I will tell the sea monster\")"));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "Tôi sẽ kể (Note: translation details)"));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "Tôi sẽ kể [Literally: I will tell]"));
+
+        // Test normal parenthesis preservation
+        assertEquals("Mở (Open)", executor.cleanRawTranslation("Original", "Mở (Open)"));
+        assertEquals("Sức mạnh (10)", executor.cleanRawTranslation("Original", "Sức mạnh (10)"));
+
+        // Test prefixes integration
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "**Vietnamese: \"Tôi sẽ kể\"**"));
+        assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "bản dịch: Tôi sẽ kể"));
+    }
 }
