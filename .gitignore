@@ -27,6 +27,9 @@ buildNumber.properties
 
 # Local data outputs
 data/output/
+data/gemini_key.txt
+data/game_path.txt
+data/cache_*.json
 
 # OS Files
 Thumbs.db

@@ -7,7 +7,7 @@
     <groupId>com.aiwrapper</groupId>
     <artifactId>ai-wrapper</artifactId>
     <version>1.0.0</version>
-    <name>AI Wrapper Modular Executor</name>
+    <name>LUanity Translator</name>
     <description>Wrapper App for Local and Cloud AI models via Strategy Pattern</description>
 
     <parent>

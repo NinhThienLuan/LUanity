@@ -1,0 +1,218 @@
+/* Custom Slate-Dark Stylesheet for AI Translation Proxy */
+
+.root {
+    -fx-background-color: #0f172a;
+}
+
+/* Label styling */
+.label {
+    -fx-text-fill: #e2e8f0;
+}
+
+/* Text fields and Text areas */
+.text-input {
+    -fx-background-color: #0b0f19;
+    -fx-text-fill: #f8fafc;
+    -fx-prompt-text-fill: #64748b;
+    -fx-background-radius: 6;
+    -fx-highlight-fill: #06b6d4;
+    -fx-border-color: #334155;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+}
+
+.text-input:focused {
+    -fx-border-color: #06b6d4;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+}
+
+/* Button styling styling */
+.button {
+    -fx-background-color: #334155;
+    -fx-text-fill: #f8fafc;
+    -fx-background-radius: 6;
+}
+
+.button:hover {
+    -fx-background-color: #475569;
+}
+
+.button:pressed {
+    -fx-background-color: #1e293b;
+}
+
+/* Style ComboBox dropdowns */
+.combo-box {
+    -fx-background-color: #0b0f19;
+    -fx-background-radius: 6;
+    -fx-border-color: #334155;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+}
+
+.combo-box>.list-cell {
+    -fx-text-fill: #f8fafc;
+    -fx-background-color: transparent;
+    -fx-padding: 4 8;
+}
+
+.combo-box-popup .list-view {
+    -fx-background-color: #1e293b;
+    -fx-background-radius: 6;
+    -fx-border-color: #334155;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+}
+
+.combo-box-popup .list-view .list-cell {
+    -fx-text-fill: #e2e8f0;
+    -fx-background-color: #1e293b;
+    -fx-padding: 6 10;
+}
+
+.combo-box-popup .list-view .list-cell:hover {
+    -fx-background-color: #334155;
+    -fx-text-fill: #06b6d4;
+}
+
+.combo-box-popup .list-view .list-cell:selected {
+    -fx-background-color: #0f172a;
+    -fx-text-fill: #06b6d4;
+    -fx-font-weight: bold;
+}
+
+/* TableView styling */
+.table-view {
+    -fx-background-color: #0b0f19;
+    -fx-background-radius: 6;
+    -fx-border-color: #1e293b;
+    -fx-border-radius: 6;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: #1e293b;
+}
+
+.table-view .column-header {
+    -fx-background-color: transparent;
+    -fx-text-fill: #94a3b8;
+}
+
+.table-view .table-row-cell {
+    -fx-background-color: #0b0f19;
+    -fx-text-fill: #e2e8f0;
+}
+
+.table-view .table-row-cell:odd {
+    -fx-background-color: #0d1321;
+}
+
+.table-view .table-row-cell:filled:hover {
+    -fx-background-color: #1e293b;
+}
+
+.table-view .table-row-cell:filled:selected {
+    -fx-background-color: #1e293b;
+    -fx-text-fill: #06b6d4;
+}
+
+/* DialogPane overrides */
+.dialog-pane {
+    -fx-background-color: #0f172a;
+    -fx-border-color: #334155;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+}
+
+.dialog-pane>.label {
+    -fx-text-fill: #f8fafc;
+}
+
+.dialog-pane .header-panel {
+    -fx-background-color: #1e293b;
+    -fx-padding: 12;
+}
+
+.dialog-pane .header-panel .label {
+    -fx-text-fill: #06b6d4;
+    -fx-font-size: 14;
+    -fx-font-weight: bold;
+}
+
+.dialog-pane .content {
+    -fx-background-color: #0f172a;
+    -fx-padding: 12;
+}
+
+.dialog-pane .button-bar {
+    -fx-background-color: #0f172a;
+    -fx-padding: 12;
+}
+
+.dialog-pane .button-bar .button {
+    -fx-padding: 6 12;
+}
+
+.dialog-pane .text-area {
+    -fx-control-inner-background: #1e293b;
+    -fx-text-fill: #f8fafc;
+}
+
+/* Cache MenuButton (pop styling) */
+.menu-button {
+    -fx-background-color: #1e293b;
+    -fx-border-color: #06b6d4;
+    -fx-border-width: 1;
+    -fx-border-radius: 6;
+    -fx-background-radius: 6;
+}
+
+.menu-button .label {
+    -fx-text-fill: #f8fafc;
+    -fx-font-weight: bold;
+}
+
+.menu-button .arrow-button .arrow {
+    -fx-background-color: #06b6d4;
+}
+
+.menu-button:hover {
+    -fx-background-color: #06b6d4;
+}
+
+.menu-button:hover .label {
+    -fx-text-fill: #0f172a;
+}
+
+.menu-button:hover .arrow-button .arrow {
+    -fx-background-color: #0f172a;
+}
+
+/* Dropdown / Context Menu styling */
+.context-menu {
+    -fx-background-color: #1e293b;
+    -fx-border-color: #334155;
+    -fx-border-radius: 6;
+    -fx-border-width: 1;
+    -fx-background-radius: 6;
+}
+
+.menu-item {
+    -fx-background-color: transparent;
+    -fx-padding: 8 16;
+}
+
+.menu-item .label {
+    -fx-text-fill: #e2e8f0;
+}
+
+.menu-item:hover,
+.menu-item:focused {
+    -fx-background-color: #334155;
+}
+
+.menu-item:hover .label,
+.menu-item:focused .label {
+    -fx-text-fill: #06b6d4;
+}

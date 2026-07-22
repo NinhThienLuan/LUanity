@@ -47,6 +47,11 @@ public class JavaFxUi {
     private int aiHits = 0;
 
     private final ObservableList<TranslationItem> historyList = FXCollections.observableArrayList();
+    private Label lblZoneCTitle;
+    private TextField gamePathField;
+    private TableView<TranslationItem> tableView;
+    private javafx.scene.control.ScrollBar verticalScrollBar;
+    private boolean isAtBottom = true;
 
     public static class TranslationItem {
         private final StringProperty type;
@@ -91,20 +96,6 @@ public class JavaFxUi {
     @Value("${local.server.port:8080}")
     private int localServerPort;
 
-    private String customPromptTemplate = "Translate the following English game text into Vietnamese according to these rules:\n"
-            +
-            "1. For single words and phrases: translate literally and precisely (dịch sát nghĩa).\n" +
-            "2. For full sentences: translate naturally to suit the game context (dịch phù hợp với ngữ cảnh).\n" +
-            "3. Do not explain, do not write anything else, only return the Vietnamese translation.\n" +
-            "4. Preserve placeholders like [[TAG_N]] exactly.\n" +
-            "5. Absolutely do not output any conversational filler or unrelated details.\n\n" +
-            "English: Continue\n" +
-            "Vietnamese: Tiếp tục\n\n" +
-            "English: Settings\n" +
-            "Vietnamese: Cài đặt\n\n" +
-            "English: {text}\n" +
-            "Vietnamese:";
-
     public JavaFxUi(ExecutorFactory executorFactory,
             AiConfig aiConfig,
             AppProperties appProperties,
@@ -118,7 +109,7 @@ public class JavaFxUi {
     }
 
     public void start(Stage stage) {
-        stage.setTitle("Modular AI Executor - Game translation Bridge");
+        stage.setTitle("LUanity Translator - Game translation Bridge");
 
         // Load saved game path
         String savedGamePath = "";
@@ -132,151 +123,190 @@ public class JavaFxUi {
             }
         }
 
-        VBox root = new VBox(16);
-        root.setPadding(new Insets(20));
+        // Load saved Gemini API key
+        String savedApiKey = "";
+        java.io.File apiKeyFile = new java.io.File("data/gemini_key.txt");
+        if (apiKeyFile.exists()) {
+            try {
+                savedApiKey = new String(java.nio.file.Files.readAllBytes(apiKeyFile.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8).trim();
+                aiConfig.getGemini().setApiKey(savedApiKey);
+            } catch (Exception ex) {
+                // Ignore
+            }
+        }
+
+        // Root Container
+        VBox root = new VBox(0);
         root.setStyle("-fx-background-color: #0f172a;"); // Slate 900
         root.setPrefWidth(1200);
         root.setPrefHeight(750);
 
-        // Header
-        Label titleLabel = new Label("AI Wrapper - Modular Executor");
-        titleLabel.setTextFill(javafx.scene.paint.Color.web("#e2e8f0"));
-        titleLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 22));
+        // TOP STATUS BAR (Horizontal fixed status bar)
+        HBox topStatusBar = new HBox(16);
+        topStatusBar.setPadding(new Insets(8, 16, 8, 16));
+        topStatusBar.setStyle("-fx-background-color: #1e293b; -fx-border-color: #334155; -fx-border-width: 0 0 1 0;");
+        topStatusBar.setPrefHeight(40);
+        topStatusBar.setMinHeight(40);
+        topStatusBar.setAlignment(Pos.CENTER_LEFT);
 
-        Label subtitleLabel = new Label("Execute batch workflows using localized and cloud LLMs via Strategy Pattern");
-        subtitleLabel.setTextFill(javafx.scene.paint.Color.web("#94a3b8"));
-        subtitleLabel.setFont(Font.font("Segoe UI", 12));
+        Label lblStatusText = new Label(translateExecutor.isProxyActive() ? "STATUS: RUNNING" : "STATUS: STOPPED");
+        lblStatusText.setStyle("-fx-font-weight: bold; -fx-text-fill: "
+                + (translateExecutor.isProxyActive() ? "#06b6d4;" : "#ef4444;") + " -fx-font-size: 12px;");
 
-        VBox header = new VBox(4, titleLabel, subtitleLabel);
-        root.getChildren().add(header);
+        Label lblReqCount = new Label("Yêu cầu: 0 (Ký tự: 0)");
+        lblReqCount.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
 
-        // Form Container - Grid constraints adjusting for new elements
+        Label lblCacheHits = new Label("Bộ đệm: 0");
+        lblCacheHits.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
+
+        Label lblAiHits = new Label("LLM Dịch: 0");
+        lblAiHits.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
+
+        topStatusBar.getChildren().addAll(
+                lblStatusText,
+                createVerticalSeparator(),
+                lblReqCount,
+                createVerticalSeparator(),
+                lblCacheHits,
+                createVerticalSeparator(),
+                lblAiHits);
+        root.getChildren().add(topStatusBar);
+
+        // Body Container (HBox)
+        HBox bodyLayout = new HBox(20);
+        bodyLayout.setPadding(new Insets(16));
+        VBox.setVgrow(bodyLayout, Priority.ALWAYS);
+        root.getChildren().add(bodyLayout);
+
+        // LEFT PANEL (Zone A Config + Separator + Zone B Actions)
+        VBox leftPane = new VBox(14);
+        leftPane.setMinWidth(460);
+        leftPane.setMaxWidth(460);
+
+        // ZONE A: CONFIG
+        Label zoneATitle = new Label("SYSTEM CONFIGURATION");
+        zoneATitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
+        zoneATitle.setTextFill(javafx.scene.paint.Color.web("#06b6d4"));
+
         GridPane grid = new GridPane();
         grid.setHgap(12);
-        grid.setVgap(12);
+        grid.setVgap(10);
         grid.setAlignment(Pos.CENTER_LEFT);
+        ColumnConstraints col1 = new ColumnConstraints(120);
+        ColumnConstraints col2 = new ColumnConstraints(280);
+        grid.getColumnConstraints().addAll(col1, col2);
 
-        ColumnConstraints col1 = new ColumnConstraints(130);
-        ColumnConstraints col2 = new ColumnConstraints(220);
-        ColumnConstraints col3 = new ColumnConstraints(90);
-        grid.getColumnConstraints().addAll(col1, col2, col3);
-
-        // 1. Provider Selection
+        // 1. Selector AI Provider
         Label providerLabel = createFormLabel("AI Provider:");
         ComboBox<String> providerSelect = new ComboBox<>(
                 FXCollections.observableArrayList("ollama", "gemini", "googletranslate"));
         providerSelect.setValue(aiConfig.getProvider() != null ? aiConfig.getProvider() : "ollama");
         styleDropdown(providerSelect);
+
+        javafx.scene.shape.Circle providerStatusDot = new javafx.scene.shape.Circle(5);
+        providerStatusDot.setFill(javafx.scene.paint.Color.GRAY);
+
+        HBox providerBox = new HBox(8, providerSelect, providerStatusDot);
+        providerBox.setAlignment(Pos.CENTER_LEFT);
+
+        grid.add(providerLabel, 0, 0);
+        grid.add(providerBox, 1, 0);
+
+        // 1b. API Key Row
+        Label apiKeyLabel = createFormLabel("Gemini API Key:");
+        PasswordField apiKeyField = new PasswordField();
+        apiKeyField.setPromptText("Enter Gemini API Key...");
+        apiKeyField.setText(savedApiKey);
+        apiKeyField.setStyle(
+                "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 8 12; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
+        // Health dot checker logic
+        Runnable checkOllamaHealth = () -> {
+            providerStatusDot.setFill(javafx.scene.paint.Color.GRAY);
+            String selectedProv = providerSelect.getValue();
+            if ("ollama".equalsIgnoreCase(selectedProv)) {
+                Thread thread = new Thread(() -> {
+                    boolean ok = false;
+                    try {
+                        java.net.URL url = new java.net.URL("http://localhost:11434/api/tags");
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                        conn.setRequestMethod("GET");
+                        conn.setConnectTimeout(2000);
+                        conn.setReadTimeout(2000);
+                        int code = conn.getResponseCode();
+                        if (code == 200) {
+                            ok = true;
+                        }
+                    } catch (Exception ex) {
+                        // ignore
+                    }
+                    final boolean success = ok;
+                    javafx.application.Platform.runLater(() -> {
+                        if ("ollama".equalsIgnoreCase(providerSelect.getValue())) {
+                            providerStatusDot.setFill(success ? javafx.scene.paint.Color.web("#22c55e")
+                                    : javafx.scene.paint.Color.web("#ef4444"));
+                        }
+                    });
+                });
+                thread.setDaemon(true);
+                thread.start();
+            } else if ("gemini".equalsIgnoreCase(selectedProv)) {
+                String key = apiKeyField.getText().trim();
+                providerStatusDot.setFill(key.isEmpty() ? javafx.scene.paint.Color.web("#ef4444")
+                        : javafx.scene.paint.Color.web("#22c55e"));
+            } else if ("googletranslate".equalsIgnoreCase(selectedProv)) {
+                providerStatusDot.setFill(javafx.scene.paint.Color.web("#22c55e"));
+            } else {
+                providerStatusDot.setFill(javafx.scene.paint.Color.GRAY);
+            }
+        };
+
         providerSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 aiConfig.setProvider(newVal.toLowerCase());
+                checkOllamaHealth.run();
             }
         });
-        grid.add(providerLabel, 0, 0);
-        grid.add(providerSelect, 1, 0);
 
-        Button editGlossaryBtn = createSecondaryButton("Edit Glossary");
-        editGlossaryBtn.setOnAction(evt -> {
-            Dialog<String> dialog = new Dialog<>();
-            dialog.setTitle("Edit Glossary");
-            dialog.setHeaderText("Add terminology mapping dictionary.\nFormat: Key=Value (one pair per line).");
-
-            ButtonType saveButtonType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
-            dialog.getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
-
-            StringBuilder glossaryBuilder = new StringBuilder();
-            java.io.File glossaryFile = new java.io.File("data/glossary.json");
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            if (glossaryFile.exists()) {
+        apiKeyField.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null) {
+                aiConfig.getGemini().setApiKey(newVal.trim());
                 try {
-                    Map<String, String> map = mapper.readValue(glossaryFile,
-                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
-                            });
-                    for (Map.Entry<String, String> entry : map.entrySet()) {
-                        glossaryBuilder.append(entry.getKey()).append("=").append(entry.getValue()).append("\n");
-                    }
-                } catch (Exception ex) {
-                    System.err.println("Failed to read glossary.json: " + ex.getMessage());
-                }
-            }
-
-            TextArea textArea = new TextArea(glossaryBuilder.toString());
-            textArea.setWrapText(true);
-            textArea.setPrefWidth(450);
-            textArea.setPrefHeight(250);
-
-            dialog.getDialogPane().setContent(textArea);
-            dialog.setResultConverter(dialogButton -> {
-                if (dialogButton == saveButtonType) {
-                    return textArea.getText();
-                }
-                return null;
-            });
-
-            dialog.showAndWait().ifPresent(content -> {
-                Map<String, String> newMap = new java.util.LinkedHashMap<>();
-                String[] lines = content.split("\\r?\\n");
-                for (String line : lines) {
-                    int eqIdx = line.indexOf('=');
-                    if (eqIdx > 0) {
-                        String key = line.substring(0, eqIdx).trim();
-                        String val = line.substring(eqIdx + 1).trim();
-                        if (!key.isEmpty() && !val.isEmpty()) {
-                            newMap.put(key, val);
-                        }
-                    }
-                }
-                try {
-                    java.io.File parent = glossaryFile.getParentFile();
+                    java.io.File file = new java.io.File("data/gemini_key.txt");
+                    java.io.File parent = file.getParentFile();
                     if (parent != null && !parent.exists()) {
                         parent.mkdirs();
                     }
-                    mapper.writerWithDefaultPrettyPrinter().writeValue(glossaryFile, newMap);
-                    System.out.println("Glossary saved to data/glossary.json successfully.");
+                    java.nio.file.Files.write(file.toPath(),
+                            newVal.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 } catch (Exception ex) {
-                    System.err.println("Failed to write glossary.json: " + ex.getMessage());
+                    // Ignore
                 }
-            });
-        });
-        grid.add(editGlossaryBtn, 2, 0);
-
-        // 2. Edit Prompt Button
-        Button editPromptBtn = createSecondaryButton("Edit Prompt");
-        editPromptBtn.setOnAction(evt -> {
-            Dialog<String> dialog = new Dialog<>();
-            dialog.setTitle("Edit Prompt Template");
-            dialog.setHeaderText(
-                    "Modify the prompt template for translation.\nUse {text} placeholder for source text.");
-
-            ButtonType saveButtonType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
-            dialog.getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
-
-            TextArea textArea = new TextArea(customPromptTemplate);
-            textArea.setWrapText(true);
-            textArea.setPrefWidth(450);
-            textArea.setPrefHeight(150);
-
-            dialog.getDialogPane().setContent(textArea);
-            dialog.setResultConverter(dialogButton -> {
-                if (dialogButton == saveButtonType) {
-                    return textArea.getText();
-                }
-                return null;
-            });
-
-            dialog.showAndWait().ifPresent(newPrompt -> {
-                customPromptTemplate = newPrompt;
-                System.out.println("Prompt template updated.");
-            });
+                checkOllamaHealth.run();
+            }
         });
 
-        // 3. Model Selection ComboBox (Editable)
+        javafx.application.Platform.runLater(checkOllamaHealth);
+
+        apiKeyLabel.managedProperty().bind(apiKeyLabel.visibleProperty());
+        apiKeyField.managedProperty().bind(apiKeyField.visibleProperty());
+
+        javafx.beans.binding.BooleanBinding isGemini = javafx.beans.binding.Bindings.createBooleanBinding(
+                () -> "gemini".equalsIgnoreCase(providerSelect.getValue()),
+                providerSelect.valueProperty());
+        apiKeyLabel.visibleProperty().bind(isGemini);
+        apiKeyField.visibleProperty().bind(isGemini);
+
+        grid.add(apiKeyLabel, 0, 1);
+        grid.add(apiKeyField, 1, 1);
+
+        // 2. Model ComboBox
         Label modelLabel = createFormLabel("Model:");
         ComboBox<String> modelSelect = new ComboBox<>();
         modelSelect.setEditable(true);
         modelSelect.setMaxWidth(Double.MAX_VALUE);
         modelSelect.setStyle(
-                "-fx-background-color: #1e293b; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 4 8;");
+                "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 4 8; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
 
         String defaultModel = "gemma2:2b";
         if ("gemini".equals(aiConfig.getProvider())) {
@@ -312,22 +342,27 @@ public class JavaFxUi {
                 }
             }
         });
+        grid.add(modelLabel, 0, 2);
+        grid.add(modelSelect, 1, 2);
 
-        grid.add(modelLabel, 0, 1);
-        grid.add(modelSelect, 1, 1);
-        grid.add(editPromptBtn, 2, 1);
-
-        // 4. Temperature Option
+        // 3. Slider Temperature
         Label tempLabel = createFormLabel("Temperature (0.1-1):");
         Slider tempSlider = new Slider(0.1, 1.0, 0.2);
         tempSlider.setShowTickLabels(true);
         tempSlider.setShowTickMarks(true);
         tempSlider.setMajorTickUnit(0.3);
         tempSlider.setBlockIncrement(0.1);
-        tempSlider.setStyle("-fx-control-inner-background: #1e293b;");
+        tempSlider.setPrefWidth(150);
+        tempSlider.setMinWidth(150);
+        tempSlider.setStyle("-fx-control-inner-background: #0b0f19;");
         Label tempValueLabel = new Label("0.2");
         tempValueLabel.setTextFill(javafx.scene.paint.Color.web("#e2e8f0"));
         tempValueLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+
+        Label tempTipLabel = new Label("(Low = precise, High = creative)");
+        tempTipLabel.setTextFill(javafx.scene.paint.Color.web("#64748b"));
+        tempTipLabel.setFont(Font.font("Segoe UI", 10));
+
         tempSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 double rounded = Math.round(newVal.doubleValue() * 10.0) / 10.0;
@@ -338,26 +373,220 @@ public class JavaFxUi {
                 }
             }
         });
-        HBox tempBox = new HBox(12, tempSlider, tempValueLabel);
-        tempBox.setAlignment(Pos.CENTER_LEFT);
-        grid.add(tempLabel, 0, 2);
-        grid.add(tempBox, 1, 2);
 
-        // 5. Port Option
-        Label portLabel = createFormLabel("Server Port:");
-        TextField portField = createTextField(String.valueOf(localServerPort));
-        portField.setMaxWidth(80);
-        portField.textProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null && newVal.matches("\\d+")) {
-                savePortToConfig(newVal);
+        HBox tempSliderRow = new HBox(8, tempSlider, tempValueLabel);
+        tempSliderRow.setAlignment(Pos.CENTER_LEFT);
+
+        VBox tempBox = new VBox(2, tempSliderRow, tempTipLabel);
+        tempBox.setAlignment(Pos.CENTER_LEFT);
+
+        grid.add(tempLabel, 0, 3);
+        grid.add(tempBox, 1, 3);
+
+        VBox zoneACard = new VBox(12, zoneATitle, grid);
+        zoneACard.setPadding(new Insets(16));
+        zoneACard.setStyle(
+                "-fx-background-color: #1e293b; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 8; -fx-background-radius: 8;");
+
+        // ZONE B: ACTIONS
+        Label zoneBTitle = new Label("PROXY ACTIONS & SHORTCUTS");
+        zoneBTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
+        zoneBTitle.setTextFill(javafx.scene.paint.Color.web("#06b6d4"));
+
+        // Big toggle proxy button (with high contrast gradient + shadows)
+        Button btnToggleProxy = new Button();
+        btnToggleProxy.setMaxWidth(Double.MAX_VALUE);
+        btnToggleProxy.setPrefHeight(45);
+        btnToggleProxy.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
+        btnToggleProxy.setCursor(javafx.scene.Cursor.HAND);
+
+        // Styling helpers for toggle button state transitions
+        java.util.function.Consumer<Boolean> applyToggleStyle = (Boolean active) -> {
+            if (active) {
+                btnToggleProxy.setText("STOP PROXY");
+                btnToggleProxy.setStyle(
+                        "-fx-background-color: linear-gradient(to right, #ef4444, #dc2626); -fx-text-fill: white; -fx-background-radius: 8; -fx-font-weight: bold; -fx-effect: dropshadow(three-pass-box, rgba(239, 68, 68, 0.4), 10, 0, 0, 2);");
+                btnToggleProxy.setOnMouseEntered(e -> btnToggleProxy.setStyle(
+                        "-fx-background-color: linear-gradient(to right, #f87171, #ef4444); -fx-text-fill: white; -fx-background-radius: 8; -fx-font-weight: bold; -fx-scale-x: 1.01; -fx-scale-y: 1.01; -fx-effect: dropshadow(three-pass-box, rgba(239, 68, 68, 0.6), 12, 0, 0, 2);"));
+                btnToggleProxy.setOnMouseExited(e -> btnToggleProxy.setStyle(
+                        "-fx-background-color: linear-gradient(to right, #ef4444, #dc2626); -fx-text-fill: white; -fx-background-radius: 8; -fx-font-weight: bold; -fx-scale-x: 1.0; -fx-scale-y: 1.0; -fx-effect: dropshadow(three-pass-box, rgba(239, 68, 68, 0.4), 10, 0, 0, 2);"));
+            } else {
+                btnToggleProxy.setText("START PROXY");
+                btnToggleProxy.setStyle(
+                        "-fx-background-color: linear-gradient(to right, #06b6d4, #0891b2); -fx-text-fill: white; -fx-background-radius: 8; -fx-font-weight: bold; -fx-effect: dropshadow(three-pass-box, rgba(6, 182, 212, 0.4), 10, 0, 0, 2);");
+                btnToggleProxy.setOnMouseEntered(e -> btnToggleProxy.setStyle(
+                        "-fx-background-color: linear-gradient(to right, #22d3ee, #06b6d4); -fx-text-fill: white; -fx-background-radius: 8; -fx-font-weight: bold; -fx-scale-x: 1.01; -fx-scale-y: 1.01; -fx-effect: dropshadow(three-pass-box, rgba(6, 182, 212, 0.6), 12, 0, 0, 2);"));
+                btnToggleProxy.setOnMouseExited(e -> btnToggleProxy.setStyle(
+                        "-fx-background-color: linear-gradient(to right, #06b6d4, #0891b2); -fx-text-fill: white; -fx-background-radius: 8; -fx-font-weight: bold; -fx-scale-x: 1.0; -fx-scale-y: 1.0; -fx-effect: dropshadow(three-pass-box, rgba(6, 182, 212, 0.4), 10, 0, 0, 2);"));
+            }
+        };
+
+        // Initial style mapping
+        applyToggleStyle.accept(translateExecutor.isProxyActive());
+
+        btnToggleProxy.setOnAction(e -> {
+            boolean currentActive = translateExecutor.isProxyActive();
+            if (currentActive) {
+                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                confirm.setTitle("Confirm Stop");
+                confirm.setHeaderText("Stop Translation Proxy?");
+                confirm.setContentText("Are you sure you want to stop the translation proxy?");
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    confirm.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                java.util.Optional<ButtonType> result = confirm.showAndWait();
+                if (result.isPresent() && result.get() == ButtonType.OK) {
+                    translateExecutor.setProxyActive(false);
+                    applyToggleStyle.accept(false);
+                    lblStatusText.setText("STATUS: STOPPED");
+                    lblStatusText.setStyle("-fx-font-weight: bold; -fx-text-fill: #ef4444; -fx-font-size: 12px;");
+                    System.out.println("Proxy stopped.");
+                }
+            } else {
+                translateExecutor.setProxyActive(true);
+                applyToggleStyle.accept(true);
+                lblStatusText.setText("STATUS: RUNNING");
+                lblStatusText.setStyle("-fx-font-weight: bold; -fx-text-fill: #06b6d4; -fx-font-size: 12px;");
+                System.out.println("Proxy started.");
             }
         });
-        grid.add(portLabel, 0, 3);
-        grid.add(portField, 1, 3);
 
-        // 6. Game Exe Path Option
+        // Edit Glossary & Edit Prompt Dialog Resource buttons (Side-by-side)
+        Button editGlossaryBtn = createSecondaryButton("Edit Glossary");
+        editGlossaryBtn.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(editGlossaryBtn, Priority.ALWAYS);
+        editGlossaryBtn.setOnAction(evt -> {
+            Dialog<String> dialog = new Dialog<>();
+            dialog.setTitle("Edit Glossary");
+            java.io.File cssFile = new java.io.File("data/ui_style.css");
+            if (cssFile.exists()) {
+                dialog.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+            }
+
+            ButtonType saveButtonType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
+            dialog.getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
+
+            StringBuilder glossaryBuilder = new StringBuilder();
+            java.io.File glossaryFile = new java.io.File("data/glossary.json");
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            if (glossaryFile.exists()) {
+                try {
+                    Map<String, String> map = mapper.readValue(glossaryFile,
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                            });
+                    for (Map.Entry<String, String> entry : map.entrySet()) {
+                        glossaryBuilder.append(entry.getKey()).append("=").append(entry.getValue()).append("\n");
+                    }
+                } catch (Exception ex) {
+                    System.err.println("Failed to read glossary.json: " + ex.getMessage());
+                }
+            }
+
+            Label desc = new Label(
+                    "Add terminology mapping dictionary (one pair per line):\nFormat: EnglishWord=VietnameseTranslation");
+            desc.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
+
+            TextArea textArea = new TextArea(glossaryBuilder.toString());
+            textArea.setWrapText(true);
+            textArea.setPrefWidth(450);
+            textArea.setPrefHeight(250);
+
+            VBox vbox = new VBox(10, desc, textArea);
+            vbox.setPadding(new Insets(10));
+            dialog.getDialogPane().setContent(vbox);
+
+            dialog.setResultConverter(dialogButton -> {
+                if (dialogButton == saveButtonType) {
+                    return textArea.getText();
+                }
+                return null;
+            });
+
+            dialog.showAndWait().ifPresent(content -> {
+                Map<String, String> newMap = new java.util.LinkedHashMap<>();
+                String[] lines = content.split("\\r?\\n");
+                for (String line : lines) {
+                    int eqIdx = line.indexOf('=');
+                    if (eqIdx > 0) {
+                        String key = line.substring(0, eqIdx).trim();
+                        String val = line.substring(eqIdx + 1).trim();
+                        if (!key.isEmpty() && !val.isEmpty()) {
+                            newMap.put(key, val);
+                        }
+                    }
+                }
+                try {
+                    java.io.File parent = glossaryFile.getParentFile();
+                    if (parent != null && !parent.exists()) {
+                        parent.mkdirs();
+                    }
+                    mapper.writerWithDefaultPrettyPrinter().writeValue(glossaryFile, newMap);
+                    System.out.println("Glossary saved to data/glossary.json successfully.");
+                } catch (Exception ex) {
+                    System.err.println("Failed to write glossary.json: " + ex.getMessage());
+                }
+            });
+        });
+
+        Button editPromptBtn = createSecondaryButton("Edit Prompt");
+        editPromptBtn.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(editPromptBtn, Priority.ALWAYS);
+        editPromptBtn.setOnAction(evt -> {
+            Dialog<String> dialog = new Dialog<>();
+            dialog.setTitle("Edit Prompt Template");
+            java.io.File cssFile = new java.io.File("data/ui_style.css");
+            if (cssFile.exists()) {
+                dialog.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+            }
+
+            ButtonType saveButtonType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
+            dialog.getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
+
+            Label desc = new Label(
+                    "Modify the prompt template for translation.\nUse {text} placeholder for source text.");
+            desc.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
+
+            TextArea textArea = new TextArea(translateExecutor.getPromptTemplate());
+            textArea.setWrapText(true);
+            textArea.setPrefWidth(450);
+            textArea.setPrefHeight(250);
+
+            VBox vbox = new VBox(10, desc, textArea);
+            vbox.setPadding(new Insets(10));
+            dialog.getDialogPane().setContent(vbox);
+
+            dialog.setResultConverter(dialogButton -> {
+                if (dialogButton == saveButtonType) {
+                    return textArea.getText();
+                }
+                return null;
+            });
+
+            dialog.showAndWait().ifPresent(newPrompt -> {
+                translateExecutor.setPromptTemplate(newPrompt);
+                System.out.println("Prompt template updated.");
+            });
+        });
+
+        HBox resBtns = new HBox(8, editGlossaryBtn, editPromptBtn);
+
+        // BepInEx Shortcut Buttons Box
+        Label shortcutTitle = createFormLabel("BepInEx Utilities:");
+        shortcutTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+        shortcutTitle.setTextFill(javafx.scene.paint.Color.web("#06b6d4")); // cyan accent
+
+        Button btnConfig = createSecondaryButton("File Config");
+        Button btnLog = createSecondaryButton("Mở File Log");
+
+        Runnable showPathWarning = () -> {
+            Alert alert = new Alert(Alert.AlertType.WARNING, "Vui lòng chọn đường dẫn game Game Exe trước!");
+            alert.showAndWait();
+        };
+
+        // Exe Path Option HBox
         Label gamePathLabel = createFormLabel("Game Exe Path:");
-        TextField gamePathField = createTextField("Path to game exe...");
+        gamePathField = createTextField("Path to game exe...");
         gamePathField.setText(savedGamePath);
         gamePathField.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
@@ -369,6 +598,33 @@ public class JavaFxUi {
                     }
                     java.nio.file.Files.write(file.toPath(),
                             newVal.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                    // Automatically load game cache into TableView if available
+                    String path = newVal.trim();
+                    if (!path.isEmpty()) {
+                        File exe = new File(path);
+                        String gameName = exe.getName();
+                        if (gameName.endsWith(".exe")) {
+                            gameName = gameName.substring(0, gameName.length() - 4);
+                        }
+                        java.io.File gameCache = new java.io.File("data/cache_" + gameName + ".json");
+                        if (gameCache.exists()) {
+                            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                            Map<String, String> cMap = mapper.readValue(gameCache,
+                                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                                    });
+                            historyList.clear();
+                            for (Map.Entry<String, String> entry : cMap.entrySet()) {
+                                historyList.add(new TranslationItem("Cache", entry.getKey(), entry.getValue()));
+                            }
+                            translateExecutor.setActiveCacheFile(gameCache);
+                        } else {
+                            translateExecutor.setActiveCacheFile(null);
+                        }
+                    } else {
+                        translateExecutor.setActiveCacheFile(null);
+                    }
+                    updateActiveCacheLabel();
                 } catch (Exception ex) {
                     // Ignore
                 }
@@ -385,24 +641,8 @@ public class JavaFxUi {
                 gamePathField.setText(file.getAbsolutePath());
             }
         });
-        grid.add(gamePathLabel, 0, 4);
-        grid.add(gamePathField, 1, 4);
-        grid.add(gamePathBrowse, 2, 4);
-
-        // BepInEx Shortcut Buttons Box
-        Label shortcutTitle = createFormLabel("BepInEx Utilities:");
-        shortcutTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-        shortcutTitle.setTextFill(javafx.scene.paint.Color.web("#38bdf8"));
-
-        Button btnConfig = createSecondaryButton("File Config");
-        Button btnLog = createSecondaryButton("Console Log");
-        Button btnFolder = createSecondaryButton("Folder Autogen");
-        Button btnClear = createSecondaryButton("Xóa Cache");
-
-        Runnable showPathWarning = () -> {
-            Alert alert = new Alert(Alert.AlertType.WARNING, "Vui lòng chọn đường dẫn game Game Exe trước!");
-            alert.showAndWait();
-        };
+        HBox gamePathRow = new HBox(8, gamePathField, gamePathBrowse);
+        VBox gamePathContainer = new VBox(6, gamePathLabel, gamePathRow);
 
         btnConfig.setOnAction(e -> {
             String path = gamePathField.getText().trim();
@@ -426,27 +666,390 @@ public class JavaFxUi {
             openFile(log);
         });
 
-        btnFolder.setOnAction(e -> {
+        Button btnImport = createSecondaryButton("Nhập từ Game");
+        btnImport.setOnAction(e -> {
             String path = gamePathField.getText().trim();
             if (path.isEmpty()) {
                 showPathWarning.run();
                 return;
             }
             File exe = new File(path);
-            File folder = new File(exe.getParentFile(), "BepInEx/Translation/vi/Text");
-            openFolder(folder);
+            File transFile = new File(exe.getParentFile(),
+                    "BepInEx/Translation/vi/Text/_AutoGeneratedTranslations.txt");
+            if (!transFile.exists()) {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle("Error");
+                alert.setHeaderText("Translation File Not Found");
+                alert.setContentText("Cannot find BepInEx translation file at:\n" + transFile.getAbsolutePath());
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                alert.showAndWait();
+                return;
+            }
+
+            try {
+                List<String> lines = java.nio.file.Files.readAllLines(transFile.toPath(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                Map<String, String> newTranslations = new java.util.LinkedHashMap<>();
+                for (String line : lines) {
+                    String trimmed = line.trim();
+                    if (trimmed.isEmpty() || trimmed.startsWith("//") || trimmed.startsWith("#")) {
+                        continue;
+                    }
+                    int eqIdx = trimmed.indexOf('=');
+                    if (eqIdx > 0) {
+                        String orig = trimmed.substring(0, eqIdx).trim();
+                        String trans = trimmed.substring(eqIdx + 1).trim();
+                        if (!orig.isEmpty() && !trans.isEmpty()) {
+                            newTranslations.put(orig, trans);
+                        }
+                    }
+                }
+
+                if (newTranslations.isEmpty()) {
+                    Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                    alert.setTitle("Information");
+                    alert.setHeaderText("No Translations Found");
+                    alert.setContentText(
+                            "The _AutoGeneratedTranslations.txt file does not contain any valid translation rows.");
+                    java.io.File cssFile = new java.io.File("data/ui_style.css");
+                    if (cssFile.exists()) {
+                        alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                    }
+                    alert.showAndWait();
+                    return;
+                }
+
+                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                confirm.setTitle("Confirm Sync");
+                confirm.setHeaderText("Sync from Game File");
+                confirm.setContentText("Found " + newTranslations.size() + " translations in game file.\n" +
+                        "Do you want to import and merge them into the active proxy cache file?");
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    confirm.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                java.util.Optional<ButtonType> result = confirm.showAndWait();
+                if (result.isPresent() && result.get() == ButtonType.OK) {
+                    translateExecutor.importTranslations(newTranslations);
+
+                    File targetCacheFile = translateExecutor.getActiveCacheFile();
+                    if (targetCacheFile == null) {
+                        String gameName = exe.getName();
+                        if (gameName.endsWith(".exe")) {
+                            gameName = gameName.substring(0, gameName.length() - 4);
+                        }
+                        targetCacheFile = new File("data/cache_" + gameName + ".json");
+                    }
+
+                    if (targetCacheFile.exists()) {
+                        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                        try {
+                            Map<String, String> cMap = mapper.readValue(targetCacheFile,
+                                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                                    });
+                            historyList.clear();
+                            for (Map.Entry<String, String> entry : cMap.entrySet()) {
+                                historyList.add(new TranslationItem("Cache", entry.getKey(), entry.getValue()));
+                            }
+                        } catch (Exception ex) {
+                            // ignore
+                        }
+                    }
+
+                    updateActiveCacheLabel();
+
+                    Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
+                    successAlert.setTitle("Success");
+                    successAlert.setHeaderText("Sync Complete");
+                    successAlert.setContentText(
+                            "Successfully imported and merged " + newTranslations.size() + " mappings!");
+                    if (cssFile.exists()) {
+                        successAlert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                    }
+                    successAlert.showAndWait();
+                }
+            } catch (Exception ex) {
+                Alert errAlert = new Alert(Alert.AlertType.ERROR);
+                errAlert.setTitle("Error");
+                errAlert.setHeaderText("Sync Failed");
+                errAlert.setContentText("Failed to read game translations:\n" + ex.getMessage());
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    errAlert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                errAlert.showAndWait();
+            }
         });
 
-        btnClear.setOnAction(e -> {
+        HBox shortcutBox = new HBox(8, btnConfig, btnLog, btnImport);
+        shortcutBox.setPadding(new Insets(4, 0, 10, 0));
+        VBox shortcutContainer = new VBox(6, shortcutTitle, shortcutBox);
+
+        VBox zoneBCard = new VBox(14, zoneBTitle, btnToggleProxy, resBtns, gamePathContainer, shortcutContainer);
+        zoneBCard.setPadding(new Insets(16));
+        zoneBCard.setStyle(
+                "-fx-background-color: #1e293b; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 8; -fx-background-radius: 8;");
+
+        leftPane.getChildren().addAll(zoneACard, zoneBCard);
+
+        // RIGHT PANEL: ZONE C (TABLE & MONITOR)
+        VBox rightPane = new VBox(10);
+        HBox.setHgrow(rightPane, Priority.ALWAYS);
+
+        // Zone C Title
+        lblZoneCTitle = new Label("ZONE C - TRANSLATION MONITOR & CACHE");
+        lblZoneCTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+        lblZoneCTitle.setTextFill(javafx.scene.paint.Color.web("#94a3b8"));
+
+        // Search + Cache Actions Box
+        HBox searchBox = new HBox(10);
+        searchBox.setAlignment(Pos.CENTER_LEFT);
+
+        Label searchLabel = createFormLabel("Tìm kiếm:");
+
+        // Search & Overlay container
+        StackPane searchFieldOverlay = new StackPane();
+        TextField searchField = createTextField("Nhập từ khóa cần tìm (Bản gốc hoặc bản dịch)...");
+        searchField.setPrefWidth(300);
+        HBox.setHgrow(searchFieldOverlay, Priority.ALWAYS);
+
+        Button btnClearSearch = new Button("×");
+        btnClearSearch.setCursor(javafx.scene.Cursor.HAND);
+        btnClearSearch.setStyle(
+                "-fx-background-color: transparent; -fx-text-fill: #94a3b8; -fx-font-size: 16px; -fx-font-weight: bold; -fx-padding: 0 10 0 0; -fx-border-width: 0;");
+        StackPane.setAlignment(btnClearSearch, Pos.CENTER_RIGHT);
+        btnClearSearch.visibleProperty().bind(searchField.textProperty().isNotEmpty());
+        btnClearSearch.setOnAction(e -> searchField.clear());
+
+        searchFieldOverlay.getChildren().addAll(searchField, btnClearSearch);
+
+        // INLINE ADD ROW FORM
+        HBox addRowBox = new HBox(8);
+        addRowBox.setAlignment(Pos.CENTER_LEFT);
+        addRowBox.setPadding(new Insets(6, 0, 6, 0));
+        addRowBox.setManaged(false);
+        addRowBox.setVisible(false);
+
+        TextField addOriginField = createTextField("English (Văn bản gốc)...");
+        addOriginField.setPrefWidth(200);
+        HBox.setHgrow(addOriginField, Priority.ALWAYS);
+
+        TextField addTransField = createTextField("Vietnamese (Bản dịch)...");
+        addTransField.setPrefWidth(200);
+        HBox.setHgrow(addTransField, Priority.ALWAYS);
+
+        Button btnCommitAdd = createSecondaryButton("Lưu");
+        btnCommitAdd.setStyle("-fx-background-color: #06b6d4; -fx-text-fill: black; -fx-font-weight: bold;");
+
+        Button btnCancelAdd = createSecondaryButton("Hủy");
+
+        addRowBox.getChildren().addAll(addOriginField, addTransField, btnCommitAdd, btnCancelAdd);
+
+        btnCommitAdd.setOnAction(e -> {
+            String orig = addOriginField.getText().trim();
+            String tran = addTransField.getText().trim();
+            if (!orig.isEmpty() && !tran.isEmpty()) {
+                translateExecutor.updateCacheValue(orig, tran);
+                historyList.add(new TranslationItem("Cache", orig, tran));
+                addOriginField.clear();
+                addTransField.clear();
+                addRowBox.setVisible(false);
+                addRowBox.setManaged(false);
+                System.out.println("Added cache row: " + orig + " -> " + tran);
+                autoExportToGame();
+                javafx.application.Platform.runLater(() -> {
+                    if (tableView != null) {
+                        tableView.requestFocus();
+                        TranslationItem currentlySelected = tableView.getSelectionModel().getSelectedItem();
+                        if (currentlySelected != null) {
+                            tableView.getSelectionModel().select(currentlySelected);
+                            tableView.scrollTo(currentlySelected);
+                        }
+                    }
+                });
+            }
+        });
+
+        btnCancelAdd.setOnAction(e -> {
+            addOriginField.clear();
+            addTransField.clear();
+            addRowBox.setVisible(false);
+            addRowBox.setManaged(false);
+        });
+
+        Button btnAddRow = new Button("+");
+        btnAddRow.setCursor(javafx.scene.Cursor.HAND);
+        btnAddRow.setStyle(
+                "-fx-background-color: #0284c7; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 6 12; -fx-font-family: 'Segoe UI'; -fx-font-weight: bold; -fx-font-size: 14px;");
+        btnAddRow.setOnAction(e -> {
+            if (addRowBox.isVisible()) {
+                addRowBox.setVisible(false);
+                addRowBox.setManaged(false);
+            } else {
+                addRowBox.setManaged(true);
+                addRowBox.setVisible(true);
+                addOriginField.requestFocus();
+            }
+        });
+
+        Button btnSync = new Button("↻");
+        btnSync.setCursor(javafx.scene.Cursor.HAND);
+        btnSync.setStyle(
+                "-fx-background-color: #1e293b; -fx-text-fill: #06b6d4; -fx-background-radius: 6; -fx-padding: 6 12; -fx-font-family: 'Segoe UI'; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6; -fx-font-weight: bold; -fx-font-size: 14px;");
+        btnSync.setTooltip(new Tooltip("Sync"));
+        btnSync.setOnAction(e -> {
             String path = gamePathField.getText().trim();
             if (path.isEmpty()) {
                 showPathWarning.run();
                 return;
             }
-            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION,
-                    "Bạn có chắc chắn muốn xóa cache của game hiện tại và proxy không?", ButtonType.YES, ButtonType.NO);
+            File exe = new File(path);
+            File transFile = new File(exe.getParentFile(),
+                    "BepInEx/Translation/vi/Text/_AutoGeneratedTranslations.txt");
+
+            File activeCache = translateExecutor.getActiveCacheFile();
+            if (activeCache == null || !activeCache.exists()) {
+                Alert alert = new Alert(Alert.AlertType.ERROR);
+                alert.setTitle("Error");
+                alert.setHeaderText("No Active Cache");
+                alert.setContentText("There is no active cache file loaded or found for this game.");
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                alert.showAndWait();
+                return;
+            }
+
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                Map<String, String> cacheMap = mapper.readValue(activeCache,
+                        new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                        });
+
+                if (cacheMap.isEmpty()) {
+                    Alert alert = new Alert(Alert.AlertType.INFORMATION);
+                    alert.setTitle("Information");
+                    alert.setHeaderText("Active Cache Empty");
+                    alert.setContentText("The active JSON cache file is empty. Nothing to export.");
+                    java.io.File cssFile = new java.io.File("data/ui_style.css");
+                    if (cssFile.exists()) {
+                        alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                    }
+                    alert.showAndWait();
+                    return;
+                }
+
+                Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+                confirm.setTitle("Confirm Export");
+                confirm.setHeaderText("Export Cache to Game");
+                confirm.setContentText(
+                        "This will write " + cacheMap.size() + " translations to BepInEx's translation file:\n"
+                                + transFile.getAbsolutePath() + "\n\nDo you want to proceed?");
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    confirm.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                java.util.Optional<ButtonType> result = confirm.showAndWait();
+                if (result.isPresent() && result.get() == ButtonType.OK) {
+                    if (transFile.getParentFile() != null && !transFile.getParentFile().exists()) {
+                        transFile.getParentFile().mkdirs();
+                    }
+
+                    try (java.io.BufferedWriter writer = new java.io.BufferedWriter(
+                            new java.io.OutputStreamWriter(new java.io.FileOutputStream(transFile),
+                                    java.nio.charset.StandardCharsets.UTF_8))) {
+                        writer.write("# Generated by AI Translation Tool\n");
+                        for (Map.Entry<String, String> entry : cacheMap.entrySet()) {
+                            writer.write(entry.getKey() + "=" + entry.getValue() + "\n");
+                        }
+                    }
+
+                    Alert successAlert = new Alert(Alert.AlertType.INFORMATION);
+                    successAlert.setTitle("Success");
+                    successAlert.setHeaderText("Export Complete");
+                    successAlert
+                            .setContentText("Successfully exported " + cacheMap.size() + " translations to game file!");
+                    if (cssFile.exists()) {
+                        successAlert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                    }
+                    successAlert.showAndWait();
+                }
+            } catch (Exception ex) {
+                Alert errAlert = new Alert(Alert.AlertType.ERROR);
+                errAlert.setTitle("Error");
+                errAlert.setHeaderText("Export Failed");
+                errAlert.setContentText("Failed to export to game:\n" + ex.getMessage());
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    errAlert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                errAlert.showAndWait();
+            }
+        });
+
+        Button btnCache = new Button("Cache");
+        btnCache.setCursor(javafx.scene.Cursor.HAND);
+        btnCache.setStyle(
+                "-fx-background-color: #1e293b; -fx-text-fill: #f8fafc; -fx-background-radius: 6; -fx-padding: 6 12; -fx-font-family: 'Segoe UI'; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6; -fx-font-weight: bold;");
+
+        ContextMenu cacheMenu = new ContextMenu();
+
+        MenuItem optLoadCache = new MenuItem("Chọn Cache...");
+        optLoadCache.setOnAction(e -> {
+            FileChooser chooser = new FileChooser();
+            chooser.setTitle("Select Cache JSON File");
+            chooser.setInitialDirectory(new java.io.File("data"));
+            chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JSON (*.json)", "*.json"));
+            java.io.File file = chooser.showOpenDialog(stage);
+            if (file != null) {
+                try {
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    Map<String, String> cMap = mapper.readValue(file,
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                            });
+                    historyList.clear();
+                    for (Map.Entry<String, String> entry : cMap.entrySet()) {
+                        historyList.add(new TranslationItem("Cache", entry.getKey(), entry.getValue()));
+                    }
+                    translateExecutor.setActiveCacheFile(file);
+                    updateActiveCacheLabel();
+                    System.out.println("Loaded " + cMap.size() + " translation mappings from cache: " + file.getName());
+                } catch (Exception ex) {
+                    System.err.println("Failed to read cache file: " + ex.getMessage());
+                }
+            }
+        });
+
+        MenuItem optClearCache = new MenuItem("Xóa Cache Game");
+        optClearCache.setStyle("-fx-text-fill: #ef4444; -fx-font-weight: bold;");
+        optClearCache.setOnAction(e -> {
+            String path = gamePathField.getText().trim();
+            if (path.isEmpty()) {
+                Alert alert = new Alert(Alert.AlertType.WARNING);
+                alert.setTitle("Warning");
+                alert.setHeaderText("Game Executable Key Missing");
+                alert.setContentText("Please select the Game Exe Path in the settings panel first.");
+                java.io.File cssFile = new java.io.File("data/ui_style.css");
+                if (cssFile.exists()) {
+                    alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+                }
+                alert.showAndWait();
+                return;
+            }
+            Alert confirm = new Alert(Alert.AlertType.CONFIRMATION);
+            confirm.setTitle("Confirm Deletion");
+            confirm.setHeaderText("Clear cache files?");
+            confirm.setContentText("Are you sure you want to delete the game cache and proxy cached translations?");
+            java.io.File cssFile = new java.io.File("data/ui_style.css");
+            if (cssFile.exists()) {
+                confirm.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
+            }
             confirm.showAndWait().ifPresent(res -> {
-                if (res == ButtonType.YES) {
+                if (res == ButtonType.OK) {
                     File exe = new File(path);
                     String gameName = exe.getName();
                     if (gameName.endsWith(".exe")) {
@@ -462,102 +1065,46 @@ public class JavaFxUi {
                         targetCache.delete();
                     }
                     historyList.clear();
+                    translateExecutor.setActiveCacheFile(null);
+                    updateActiveCacheLabel();
                     totalRequests = 0;
                     totalChars = 0;
                     cacheHits = 0;
                     aiHits = 0;
+                    lblReqCount.setText("Yêu cầu: 0 (Ký tự: 0)");
+                    lblCacheHits.setText("Bộ đệm: 0");
+                    lblAiHits.setText("LLM Dịch: 0");
                     System.out.println("Caches wiped successfully.");
                 }
             });
         });
 
-        HBox shortcutBox = new HBox(8, btnConfig, btnLog, btnFolder, btnClear);
-        shortcutBox.setPadding(new Insets(4, 0, 12, 0));
-        VBox shortcutContainer = new VBox(6, shortcutTitle, shortcutBox);
+        cacheMenu.getItems().addAll(optLoadCache, optClearCache);
 
-        // Separators
-        Separator sep = new Separator();
-        sep.setStyle("-fx-background-color: #334155;");
-
-        Label statusLabel = new Label("Status: Ready (Proxy listening...)");
-        statusLabel.setTextFill(javafx.scene.paint.Color.web("#10b981"));
-        statusLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-
-        // Console log area
-        TextArea console = new TextArea();
-        console.setEditable(false);
-        console.setWrapText(true);
-        console.setPrefHeight(120);
-        console.setMinHeight(120);
-        console.setStyle(
-                "-fx-control-inner-background: #0b0f19; -fx-text-fill: #10b981; -fx-font-family: Consolas, 'Courier New', monospace; -fx-font-size: 11;");
-        console.appendText("System ready. Live proxy active.\n");
-
-        // Intercept System.out to show in UI console
-        PrintStream oldOut = System.out;
-        System.setOut(new PrintStream(new OutputStream() {
-            @Override
-            public void write(int b) {
-                oldOut.write(b);
-                javafx.application.Platform.runLater(() -> console.appendText(String.valueOf((char) b)));
+        btnCache.setOnAction(e -> {
+            if (cacheMenu.isShowing()) {
+                cacheMenu.hide();
+            } else {
+                cacheMenu.show(btnCache, javafx.geometry.Side.BOTTOM, btnCache.getWidth() - 170, 0);
             }
+        });
 
-            @Override
-            public void write(byte[] b, int off, int len) {
-                oldOut.write(b, off, len);
-                String str = new String(b, off, len);
-                javafx.application.Platform.runLater(() -> console.appendText(str));
-            }
-        }));
-
-        // Left Container (Form parameters)
-        VBox leftPane = new VBox(12);
-        leftPane.setMinWidth(460);
-        leftPane.setMaxWidth(460);
-        leftPane.getChildren().addAll(grid, sep, shortcutContainer, statusLabel);
-
-        // Right Container Setup (Stats, Search, TableView, Compact Console)
-        VBox rightPane = new VBox(10);
-        HBox.setHgrow(rightPane, Priority.ALWAYS);
-
-        // Stats Box
-        Label lblReqCount = new Label("Yêu cầu: 0 (Ký tự: 0)");
-        lblReqCount.setTextFill(javafx.scene.paint.Color.web("#94a3b8"));
-        lblReqCount.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-
-        Label lblCacheHits = new Label("Bộ đệm: 0");
-        lblCacheHits.setTextFill(javafx.scene.paint.Color.web("#10b981"));
-        lblCacheHits.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-
-        Label lblAiHits = new Label("LLM Dịch: 0");
-        lblAiHits.setTextFill(javafx.scene.paint.Color.web("#8b5cf6"));
-        lblAiHits.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-
-        HBox statsBox = new HBox(24, lblReqCount, lblCacheHits, lblAiHits);
-        statsBox.setStyle("-fx-background-color: #1e293b; -fx-padding: 8 16; -fx-background-radius: 6;");
-        statsBox.setAlignment(Pos.CENTER_LEFT);
-
-        // Search Box
-        Label searchLabel = createFormLabel("Tìm kiếm:");
-        TextField searchField = createTextField("Nhập từ khóa cần tìm (Bản gốc hoặc bản dịch)...");
-        searchField.setPrefWidth(300);
-        HBox.setHgrow(searchField, Priority.ALWAYS);
-        Button clearSearch = createSecondaryButton("Xóa");
-        clearSearch.setOnAction(e -> searchField.clear());
-        HBox searchBox = new HBox(10, searchLabel, searchField, clearSearch);
-        searchBox.setAlignment(Pos.CENTER_LEFT);
+        searchBox.getChildren().addAll(searchLabel, searchFieldOverlay, btnAddRow, btnSync, btnCache);
 
         // History TableView
-        TableView<TranslationItem> tableView = new TableView<>();
+        tableView = new TableView<>();
         tableView.setEditable(true);
         tableView.setStyle(
                 "-fx-background-color: #0b0f19; -fx-control-inner-background: #0b0f19; -fx-table-cell-border-color: #1e293b;");
+        tableView.setFixedCellSize(30.0);
+        tableView.setPrefHeight(300);
+        tableView.setMinHeight(200);
 
         TableColumn<TranslationItem, String> typeCol = new TableColumn<>("Loại");
         typeCol.setCellValueFactory(new PropertyValueFactory<>("type"));
         typeCol.setPrefWidth(80);
         typeCol.setMaxWidth(100);
-        typeCol.setStyle("-fx-alignment: CENTER; -fx-text-fill: #38bdf8;");
+        typeCol.setStyle("-fx-alignment: CENTER; -fx-text-fill: #06b6d4;"); // Cyan accent for type Column
 
         TableColumn<TranslationItem, String> originCol = new TableColumn<>("Văn bản gốc");
         originCol.setCellValueFactory(new PropertyValueFactory<>("original"));
@@ -567,7 +1114,7 @@ public class JavaFxUi {
         TableColumn<TranslationItem, String> transCol = new TableColumn<>("Bản dịch Việt");
         transCol.setCellValueFactory(new PropertyValueFactory<>("translated"));
         transCol.setPrefWidth(280);
-        transCol.setStyle("-fx-text-fill: #22d3ee;");
+        transCol.setStyle("-fx-text-fill: #06b6d4;"); // Cyan accent for translation Column
         transCol.setCellFactory(TextFieldTableCell.forTableColumn());
         transCol.setOnEditCommit(event -> {
             TranslationItem item = event.getRowValue();
@@ -575,21 +1122,35 @@ public class JavaFxUi {
             if (newTranslation != null && !newTranslation.equals(event.getOldValue())) {
                 item.setTranslated(newTranslation);
                 translateExecutor.updateCacheValue(item.getOriginal(), newTranslation);
+                autoExportToGame();
             }
         });
 
         tableView.getColumns().addAll(typeCol, originCol, transCol);
 
         ContextMenu rowMenu = new ContextMenu();
-        MenuItem mntAddToGlobal = new MenuItem("Thêm vào cache tổng (Shared Global)");
-        mntAddToGlobal.setOnAction(evt -> {
+        MenuItem mntPin = new MenuItem("Pin (Thêm vào glossary)");
+        mntPin.setOnAction(evt -> {
             TranslationItem selected = tableView.getSelectionModel().getSelectedItem();
             if (selected != null) {
-                translateExecutor.updateGlobalCacheValue(selected.getOriginal(), selected.getTranslated());
-                System.out.println("Đã lưu bản dịch '" + selected.getOriginal() + "' vào cache tổng.");
+                translateExecutor.updateGlossaryValue(selected.getOriginal(), selected.getTranslated());
+                System.out.println("Pinned translation to glossary: " + selected.getOriginal() + " -> "
+                        + selected.getTranslated());
             }
         });
-        rowMenu.getItems().add(mntAddToGlobal);
+
+        MenuItem mntDelete = new MenuItem("Xóa dòng");
+        mntDelete.setStyle("-fx-text-fill: #ef4444;");
+        mntDelete.setOnAction(evt -> {
+            TranslationItem selected = tableView.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                translateExecutor.deleteCacheValue(selected.getOriginal());
+                historyList.remove(selected);
+                System.out.println("Deleted cache row: " + selected.getOriginal());
+                autoExportToGame();
+            }
+        });
+        rowMenu.getItems().addAll(mntPin, mntDelete);
 
         tableView.setRowFactory(tv -> {
             TableRow<TranslationItem> row = new TableRow<>();
@@ -602,6 +1163,8 @@ public class JavaFxUi {
 
         tableView.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY);
         VBox.setVgrow(tableView, Priority.ALWAYS);
+
+        // Auto-scroll lockout tracked via scrollbar values
 
         // Filter and bind TableView
         FilteredList<TranslationItem> filteredData = new FilteredList<>(historyList, p -> true);
@@ -621,12 +1184,47 @@ public class JavaFxUi {
         });
         tableView.setItems(filteredData);
 
-        // Connect listener to real-time events from TranslateExecutor
+        // Console Log text area
+        Label monitorLabel = createFormLabel("Live Execution Monitor / Console Log:");
+        monitorLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+        monitorLabel.setTextFill(javafx.scene.paint.Color.web("#06b6d4")); // cyan accent
+
+        TextArea console = new TextArea();
+        console.setEditable(false);
+        console.setWrapText(true);
+        console.setPrefHeight(150);
+        console.setMinHeight(120);
+        console.setStyle(
+                "-fx-control-inner-background: #0b0f19; -fx-text-fill: #06b6d4; -fx-font-family: Consolas, 'Courier New', monospace; -fx-font-size: 11;");
+        console.appendText("System ready. Live proxy active.\n");
+
+        // Intercept System.out
+        PrintStream oldOut = System.out;
+        System.setOut(new PrintStream(new OutputStream() {
+            @Override
+            public void write(int b) {
+                oldOut.write(b);
+                javafx.application.Platform.runLater(() -> console.appendText(String.valueOf((char) b)));
+            }
+
+            @Override
+            public void write(byte[] b, int off, int len) {
+                oldOut.write(b, off, len);
+                String str = new String(b, off, len);
+                javafx.application.Platform.runLater(() -> console.appendText(str));
+            }
+        }));
+
+        rightPane.getChildren().addAll(lblZoneCTitle, searchBox, addRowBox, tableView, monitorLabel, console);
+
+        bodyLayout.getChildren().addAll(leftPane, rightPane);
+
+        // Connect listener to stats
         translateExecutor.setTranslationListener((original, translated, type, characterCount) -> {
             javafx.application.Platform.runLater(() -> {
                 totalRequests++;
                 totalChars += characterCount;
-                if ("Cache".equals(type)) {
+                if ("cache".equalsIgnoreCase(type)) {
                     cacheHits++;
                 } else {
                     aiHits++;
@@ -634,33 +1232,141 @@ public class JavaFxUi {
                 lblReqCount.setText("Yêu cầu: " + totalRequests + " (Ký tự: " + totalChars + ")");
                 lblCacheHits.setText("Bộ đệm: " + cacheHits);
                 lblAiHits.setText("LLM Dịch: " + aiHits);
-
-                // Add to start of history list
-                historyList.add(0, new TranslationItem(type, original, translated));
+                TranslationItem selected = (tableView != null) ? tableView.getSelectionModel().getSelectedItem() : null;
+                TranslationItem newItem = new TranslationItem(type, original, translated);
+                historyList.add(newItem);
                 if (historyList.size() > 500) {
-                    historyList.remove(historyList.size() - 1);
+                    historyList.remove(0);
+                }
+                if (tableView != null && selected != null) {
+                    tableView.getSelectionModel().select(selected);
+                }
+                if (isAtBottom && tableView != null) {
+                    tableView.scrollTo(historyList.size() - 1);
                 }
             });
         });
 
-        // Live execution monitor label
-        Label monitorLabel = createFormLabel("Live Execution Monitor / Console Log:");
-        monitorLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-        monitorLabel.setTextFill(javafx.scene.paint.Color.web("#38bdf8"));
+        if (!savedGamePath.isEmpty()) {
+            try {
+                File exe = new File(savedGamePath);
+                String gameName = exe.getName();
+                if (gameName.endsWith(".exe")) {
+                    gameName = gameName.substring(0, gameName.length() - 4);
+                }
+                java.io.File gameCache = new java.io.File("data/cache_" + gameName + ".json");
+                if (gameCache.exists()) {
+                    com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+                    Map<String, String> cMap = mapper.readValue(gameCache,
+                            new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                            });
+                    historyList.clear();
+                    for (Map.Entry<String, String> entry : cMap.entrySet()) {
+                        historyList.add(new TranslationItem("Cache", entry.getKey(), entry.getValue()));
+                    }
+                    translateExecutor.setActiveCacheFile(gameCache);
+                }
+            } catch (Exception ex) {
+                // Ignore
+            }
+        }
 
-        rightPane.getChildren().addAll(statsBox, searchBox, tableView, monitorLabel, console);
-
-        // Main Layout (Left and Right Split Pane clone)
-        HBox mainLayout = new HBox(20);
-        VBox.setVgrow(mainLayout, Priority.ALWAYS);
-        mainLayout.getChildren().addAll(leftPane, rightPane);
-
-        root.getChildren().addAll(mainLayout);
+        updateActiveCacheLabel();
 
         Scene scene = new Scene(root);
+        java.io.File cssFile = new java.io.File("data/ui_style.css");
+        if (cssFile.exists()) {
+            scene.getStylesheets().add(cssFile.toURI().toString());
+        }
         stage.setScene(scene);
         stage.setResizable(true);
         stage.show();
+        javafx.application.Platform.runLater(this::initScrollTracking);
+    }
+
+    private void updateActiveCacheLabel() {
+        if (lblZoneCTitle == null)
+            return;
+        File active = translateExecutor.getActiveCacheFile();
+        String activeName = (active != null) ? active.getName() : "none";
+        if (!isAtBottom) {
+            lblZoneCTitle.setText("ZONE C - TRANSLATION MONITOR & CACHE (" + activeName
+                    + ") [⏸ Đang xem cache cũ - cuộn xuống cuối để tiếp tục theo dõi]");
+        } else {
+            lblZoneCTitle.setText("ZONE C - TRANSLATION MONITOR & CACHE (" + activeName + ")");
+        }
+    }
+
+    private void initScrollTracking() {
+        if (tableView == null)
+            return;
+        tableView.applyCss();
+        tableView.layout();
+        verticalScrollBar = findVerticalScrollBar(tableView);
+        if (verticalScrollBar != null) {
+            verticalScrollBar.valueProperty().addListener((obs, oldVal, newVal) -> {
+                if (newVal != null) {
+                    isAtBottom = (newVal.doubleValue() >= 0.98);
+                    updateActiveCacheLabel();
+                }
+            });
+            System.out.println("Vertical scroll tracking initialized successfully.");
+        } else {
+            System.err.println("Failed to find vertical ScrollBar in TableView.");
+        }
+    }
+
+    private javafx.scene.control.ScrollBar findVerticalScrollBar(javafx.scene.Node node) {
+        if (node instanceof javafx.scene.control.ScrollBar) {
+            javafx.scene.control.ScrollBar sb = (javafx.scene.control.ScrollBar) node;
+            if (sb.getOrientation() == javafx.geometry.Orientation.VERTICAL) {
+                return sb;
+            }
+        }
+        if (node instanceof javafx.scene.Parent) {
+            for (javafx.scene.Node child : ((javafx.scene.Parent) node).getChildrenUnmodifiable()) {
+                javafx.scene.control.ScrollBar sb = findVerticalScrollBar(child);
+                if (sb != null) {
+                    return sb;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void autoExportToGame() {
+        if (gamePathField == null)
+            return;
+        String path = gamePathField.getText().trim();
+        if (path.isEmpty())
+            return;
+        File exe = new File(path);
+        File transFile = new File(exe.getParentFile(), "BepInEx/Translation/vi/Text/_AutoGeneratedTranslations.txt");
+        File activeCache = translateExecutor.getActiveCacheFile();
+        if (activeCache == null || !activeCache.exists())
+            return;
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            Map<String, String> cacheMap = mapper.readValue(activeCache,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
+                    });
+            if (cacheMap.isEmpty())
+                return;
+            if (transFile.getParentFile() != null && !transFile.getParentFile().exists()) {
+                transFile.getParentFile().mkdirs();
+            }
+            try (java.io.BufferedWriter writer = new java.io.BufferedWriter(
+                    new java.io.OutputStreamWriter(new java.io.FileOutputStream(transFile),
+                            java.nio.charset.StandardCharsets.UTF_8))) {
+                writer.write("# Generated by AI Translation Tool\n");
+                for (Map.Entry<String, String> entry : cacheMap.entrySet()) {
+                    writer.write(entry.getKey() + "=" + entry.getValue() + "\n");
+                }
+            }
+            System.out.println("Auto-exported " + cacheMap.size() + " translations to game file.");
+        } catch (Exception ex) {
+            System.err.println("Auto-export failed: " + ex.getMessage());
+        }
     }
 
     private void openFile(File file) {
@@ -676,21 +1382,6 @@ public class JavaFxUi {
             }
         } catch (Exception ex) {
             System.err.println("Failed to open file: " + ex.getMessage());
-        }
-    }
-
-    private void openFolder(File file) {
-        if (!file.exists()) {
-            file.mkdirs();
-        }
-        try {
-            if (System.getProperty("os.name").toLowerCase().contains("win")) {
-                Runtime.getRuntime().exec("explorer.exe " + file.getAbsolutePath());
-            } else {
-                java.awt.Desktop.getDesktop().open(file);
-            }
-        } catch (Exception ex) {
-            System.err.println("Failed to open folder: " + ex.getMessage());
         }
     }
 
@@ -779,6 +1470,13 @@ public class JavaFxUi {
         });
 
         new Thread(fetchTask).start();
+    }
+
+    private Separator createVerticalSeparator() {
+        Separator sep = new Separator(javafx.geometry.Orientation.VERTICAL);
+        sep.setStyle("-fx-background-color: #334155;");
+        sep.setPrefHeight(16);
+        return sep;
     }
 
     private void savePortToConfig(String newPort) {

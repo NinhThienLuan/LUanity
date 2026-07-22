@@ -23,29 +23,79 @@ public class TranslateExecutor implements BaseExecutor {
     }
 
     private TranslationListener listener;
+    private File activeCacheFile = null;
 
     public void setTranslationListener(TranslationListener listener) {
         this.listener = listener;
     }
 
+    public File getActiveCacheFile() {
+        return activeCacheFile;
+    }
+
+    public void setActiveCacheFile(File activeCacheFile) {
+        this.activeCacheFile = activeCacheFile;
+    }
+
     private final AiProviderFactory aiFactory;
-    private final PromptTemplate template = new PromptTemplate(
-            "Translate the following English game text into Vietnamese according to these rules:\n" +
-                    "1. For single words and phrases: translate literally and precisely (dịch sát nghĩa).\n" +
-                    "2. For full sentences: translate naturally to suit the game context (dịch phù hợp với ngữ cảnh).\n"
-                    +
-                    "3. Do not explain, do not write anything else, only return the Vietnamese translation.\n" +
-                    "4. Preserve placeholders like [[TAG_N]] exactly.\n" +
-                    "5. Absolutely do not output any conversational filler or unrelated details.\n\n"
-                    + "English: Continue\n" +
-                    "Vietnamese: Tiếp tục\n\n" +
-                    "English: Settings\n" +
-                    "Vietnamese: Cài đặt\n\n" +
-                    "English: {text}\n" +
-                    "Vietnamese:");
+    private String promptTemplateString = "Translate the following English game text into Vietnamese according to these rules:\n"
+            +
+            "1. For single words and phrases: translate literally and precisely (dịch sát nghĩa).\n" +
+            "2. For full sentences: translate naturally to suit the game context (dịch phù hợp với ngữ cảnh).\n" +
+            "3. Do not explain, do not write anything else, only return the Vietnamese translation.\n" +
+            "4. Preserve placeholders like [[TAG_N]] exactly.\n" +
+            "5. Absolutely do not output any conversational filler or unrelated details.\n\n" +
+            "English: Continue\n" +
+            "Vietnamese: Tiếp tục\n\n" +
+            "English: Settings\n" +
+            "Vietnamese: Cài đặt\n\n" +
+            "English: {text}\n" +
+            "Vietnamese:";
 
     public TranslateExecutor(AiProviderFactory aiFactory) {
         this.aiFactory = aiFactory;
+        loadPromptTemplate();
+    }
+
+    private void loadPromptTemplate() {
+        java.io.File file = new java.io.File("data/prompt_template.txt");
+        if (file.exists()) {
+            try {
+                this.promptTemplateString = new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+    }
+
+    public String getPromptTemplate() {
+        return promptTemplateString;
+    }
+
+    public void setPromptTemplate(String promptTemplateString) {
+        this.promptTemplateString = promptTemplateString;
+        try {
+            java.io.File file = new java.io.File("data/prompt_template.txt");
+            java.io.File parent = file.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            java.nio.file.Files.write(file.toPath(),
+                    promptTemplateString.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception e) {
+            // Ignore
+        }
+    }
+
+    private boolean proxyActive = true;
+
+    public boolean isProxyActive() {
+        return proxyActive;
+    }
+
+    public void setProxyActive(boolean proxyActive) {
+        this.proxyActive = proxyActive;
     }
 
     public static class TagPreserver {
@@ -55,7 +105,7 @@ public class TranslateExecutor implements BaseExecutor {
             if (text == null)
                 return null;
             java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
-                    "(<[^>]+>|\\{[^}]+\\}|\\b\\d+(?:\\.\\d+)?\\s*(?i:km/h|km|kg|lbs|ghz|mhz|hz|mph|fps|sec|ml|oz|px|pt|in|ft|yd|g|l|s|m)\\b)");
+                    "(<[^>]+>|\\{[^}]+\\}|\\b\\d+(?:\\.\\d+)?\\s*(?i:km/h|km|kg|lbs|ghz|mhz|hz|mph|fps|sec|ml|oz|px|pt|in|ft|yd|g|l|s|m)\\b|(?i)\\b[xX]\\s*\\d+\\b|\\b\\d+\\s*[xX]\\b)");
             java.util.regex.Matcher matcher = pattern.matcher(text);
             StringBuilder sb = new StringBuilder();
             int index = 0;
@@ -106,30 +156,31 @@ public class TranslateExecutor implements BaseExecutor {
         ObjectMapper mapper = new ObjectMapper();
         Map<String, String> cacheMap = new java.util.HashMap<>();
 
-        File globalCacheFile = new File("data/cache.json");
-        if (globalCacheFile.exists()) {
+        File activeCache = activeCacheFile;
+        File gameCacheFile = null;
+        if (activeCache != null && activeCache.exists()) {
             try {
-                Map<String, String> globalCache = mapper.readValue(globalCacheFile,
+                Map<String, String> loadedActiveCache = mapper.readValue(activeCache,
                         new TypeReference<Map<String, String>>() {
                         });
-                cacheMap.putAll(globalCache);
+                cacheMap.putAll(loadedActiveCache);
+                gameCacheFile = activeCache;
             } catch (Exception e) {
-                System.err.println("Warning: Could not read global translation cache: " + e.getMessage());
+                System.err.println("Warning: Could not read active cache: " + e.getMessage());
             }
-        }
-
-        String gameName = getGameName();
-        File gameCacheFile = null;
-        if (gameName != null && !gameName.isEmpty()) {
-            gameCacheFile = new File("data/cache_" + gameName + ".json");
-            if (gameCacheFile.exists()) {
-                try {
-                    Map<String, String> gameCache = mapper.readValue(gameCacheFile,
-                            new TypeReference<Map<String, String>>() {
-                            });
-                    cacheMap.putAll(gameCache);
-                } catch (Exception e) {
-                    System.err.println("Warning: Could not read game translation cache: " + e.getMessage());
+        } else {
+            String gameName = getGameName();
+            if (gameName != null && !gameName.isEmpty()) {
+                gameCacheFile = new File("data/cache_" + gameName + ".json");
+                if (gameCacheFile.exists()) {
+                    try {
+                        Map<String, String> gameCache = mapper.readValue(gameCacheFile,
+                                new TypeReference<Map<String, String>>() {
+                                });
+                        cacheMap.putAll(gameCache);
+                    } catch (Exception e) {
+                        System.err.println("Warning: Could not read game translation cache: " + e.getMessage());
+                    }
                 }
             }
         }
@@ -147,7 +198,8 @@ public class TranslateExecutor implements BaseExecutor {
         }
 
         // Get template options override
-        PromptTemplate activeTemplate = template;
+        PromptTemplate activeTemplate = new PromptTemplate(
+                promptTemplateString);
         if (options != null && options.containsKey("promptTemplate")) {
             String customT = String.valueOf(options.get("promptTemplate"));
             if (customT != null && !customT.trim().isEmpty()) {
@@ -266,28 +318,6 @@ public class TranslateExecutor implements BaseExecutor {
                     parentDir.mkdirs();
                 }
                 mapper.writerWithDefaultPrettyPrinter().writeValue(gameCacheFile, gameCacheMap);
-            } else {
-                Map<String, String> globalCacheMap = new java.util.HashMap<>();
-                if (globalCacheFile.exists()) {
-                    try {
-                        globalCacheMap = mapper.readValue(globalCacheFile, new TypeReference<Map<String, String>>() {
-                        });
-                    } catch (Exception e) {
-                    }
-                }
-                for (Map<String, Object> resultRow : results) {
-                    Object textObj = resultRow.get("text");
-                    String text = textObj != null ? String.valueOf(textObj) : "";
-                    String translated = String.valueOf(resultRow.get("translated"));
-                    if (!text.isEmpty()) {
-                        globalCacheMap.put(text, translated);
-                    }
-                }
-                File parentDir = globalCacheFile.getParentFile();
-                if (parentDir != null && !parentDir.exists()) {
-                    parentDir.mkdirs();
-                }
-                mapper.writerWithDefaultPrettyPrinter().writeValue(globalCacheFile, globalCacheMap);
             }
         } catch (Exception e) {
             System.err.println("Warning: Could not write translation cache: " + e.getMessage());
@@ -297,6 +327,9 @@ public class TranslateExecutor implements BaseExecutor {
     }
 
     public String translateSingle(String text, Map<String, Object> options) {
+        if (!proxyActive) {
+            return text;
+        }
         if (text == null || text.trim().isEmpty()) {
             return text;
         }
@@ -305,36 +338,39 @@ public class TranslateExecutor implements BaseExecutor {
         ObjectMapper mapper = new ObjectMapper();
         Map<String, String> cacheMap = new java.util.HashMap<>();
 
-        File globalCacheFile = new File("data/cache.json");
-        if (globalCacheFile.exists()) {
+        File activeCache = activeCacheFile;
+        File gameCacheFile = null;
+        if (activeCache != null && activeCache.exists()) {
             try {
-                Map<String, String> globalCache = mapper.readValue(globalCacheFile,
+                Map<String, String> loadedActiveCache = mapper.readValue(activeCache,
                         new TypeReference<Map<String, String>>() {
                         });
-                cacheMap.putAll(globalCache);
+                cacheMap.putAll(loadedActiveCache);
+                gameCacheFile = activeCache;
             } catch (Exception e) {
                 // Ignore
             }
-        }
-
-        String gameName = getGameName();
-        File gameCacheFile = null;
-        if (gameName != null && !gameName.isEmpty()) {
-            gameCacheFile = new File("data/cache_" + gameName + ".json");
-            if (gameCacheFile.exists()) {
-                try {
-                    Map<String, String> gameCache = mapper.readValue(gameCacheFile,
-                            new TypeReference<Map<String, String>>() {
-                            });
-                    cacheMap.putAll(gameCache);
-                } catch (Exception e) {
-                    // Ignore
+        } else {
+            String gameName = getGameName();
+            if (gameName != null && !gameName.isEmpty()) {
+                gameCacheFile = new File("data/cache_" + gameName + ".json");
+                if (gameCacheFile.exists()) {
+                    try {
+                        Map<String, String> gameCache = mapper.readValue(gameCacheFile,
+                                new TypeReference<Map<String, String>>() {
+                                });
+                        cacheMap.putAll(gameCache);
+                    } catch (Exception e) {
+                        // Ignore
+                    }
                 }
             }
         }
 
         // Clean loaded caches: remove any junk entries
-        cacheMap.entrySet().removeIf(entry -> isRefusalOrJunk(entry.getValue()));
+        cacheMap.entrySet().removeIf(entry ->
+
+        isRefusalOrJunk(entry.getValue()));
 
         if (cacheMap.containsKey(text)) {
             String cached = cacheMap.get(text);
@@ -379,7 +415,7 @@ public class TranslateExecutor implements BaseExecutor {
             promptText = glossaryPrompt.toString();
         }
 
-        PromptTemplate activeTemplate = template;
+        PromptTemplate activeTemplate = new PromptTemplate(promptTemplateString);
         if (options != null && options.containsKey("promptTemplate")) {
             String customT = String.valueOf(options.get("promptTemplate"));
             if (customT != null && !customT.trim().isEmpty()) {
@@ -443,29 +479,20 @@ public class TranslateExecutor implements BaseExecutor {
                         parentDir.mkdirs();
                     }
                     mapper.writerWithDefaultPrettyPrinter().writeValue(gameCacheFile, gameCacheMap);
-                } else {
-                    Map<String, String> globalCacheMap = new java.util.HashMap<>();
-                    if (globalCacheFile.exists()) {
-                        try {
-                            globalCacheMap = mapper.readValue(globalCacheFile,
-                                    new TypeReference<Map<String, String>>() {
-                                    });
-                        } catch (Exception e) {
-                        }
-                    }
-                    globalCacheMap.put(text, translated);
-                    File parentDir = globalCacheFile.getParentFile();
-                    if (parentDir != null && !parentDir.exists()) {
-                        parentDir.mkdirs();
-                    }
-                    mapper.writerWithDefaultPrettyPrinter().writeValue(globalCacheFile, globalCacheMap);
                 }
             } catch (Exception e) {
                 // Ignore
             }
 
             if (listener != null) {
-                String type = matchedGlossary.isEmpty() ? "AI" : "Glossary";
+                boolean exactGlossaryMatch = false;
+                for (String key : matchedGlossary.keySet()) {
+                    if (key.equalsIgnoreCase(text)) {
+                        exactGlossaryMatch = true;
+                        break;
+                    }
+                }
+                String type = exactGlossaryMatch ? "Glossary" : "AI";
                 listener.onTranslation(text, translated, type, text.length());
             }
 
@@ -574,11 +601,14 @@ public class TranslateExecutor implements BaseExecutor {
         if (original == null || translated == null)
             return;
         ObjectMapper mapper = new ObjectMapper();
-        File globalCacheFile = new File("data/cache.json");
-        String gameName = getGameName();
-        File targetCacheFile = (gameName != null && !gameName.isEmpty())
-                ? new File("data/cache_" + gameName + ".json")
-                : globalCacheFile;
+        File targetCacheFile = activeCacheFile;
+        if (targetCacheFile == null) {
+            File globalCacheFile = new File("data/cache.json");
+            String gameName = getGameName();
+            targetCacheFile = (gameName != null && !gameName.isEmpty())
+                    ? new File("data/cache_" + gameName + ".json")
+                    : globalCacheFile;
+        }
         try {
             Map<String, String> cacheMap = new java.util.HashMap<>();
             if (targetCacheFile.exists()) {
@@ -597,26 +627,81 @@ public class TranslateExecutor implements BaseExecutor {
         }
     }
 
-    public void updateGlobalCacheValue(String original, String translated) {
+    public void updateGlossaryValue(String original, String translated) {
         if (original == null || translated == null)
             return;
         ObjectMapper mapper = new ObjectMapper();
-        File globalCacheFile = new File("data/cache.json");
+        File glossaryFile = new File("data/glossary.json");
         try {
-            Map<String, String> cacheMap = new java.util.HashMap<>();
-            if (globalCacheFile.exists()) {
-                cacheMap = mapper.readValue(globalCacheFile, new TypeReference<Map<String, String>>() {
+            Map<String, String> glossaryMap = new java.util.HashMap<>();
+            if (glossaryFile.exists()) {
+                glossaryMap = mapper.readValue(glossaryFile, new TypeReference<Map<String, String>>() {
                 });
             }
-            cacheMap.put(original, translated);
-            File parentDir = globalCacheFile.getParentFile();
+            glossaryMap.put(original, translated);
+            File parentDir = glossaryFile.getParentFile();
             if (parentDir != null && !parentDir.exists()) {
                 parentDir.mkdirs();
             }
-            mapper.writerWithDefaultPrettyPrinter().writeValue(globalCacheFile, cacheMap);
-            System.out.println("Global cache entry added: " + original + " -> " + translated);
+            mapper.writerWithDefaultPrettyPrinter().writeValue(glossaryFile, glossaryMap);
+            System.out.println("Glossary entry updated: " + original + " -> " + translated);
         } catch (Exception e) {
-            System.err.println("Failed to update global cache: " + e.getMessage());
+            System.err.println("Failed to update glossary: " + e.getMessage());
+        }
+    }
+
+    public void deleteCacheValue(String original) {
+        if (original == null)
+            return;
+        ObjectMapper mapper = new ObjectMapper();
+        File targetCacheFile = activeCacheFile;
+        if (targetCacheFile == null) {
+            String gameName = getGameName();
+            targetCacheFile = (gameName != null && !gameName.isEmpty())
+                    ? new File("data/cache_" + gameName + ".json")
+                    : new File("data/cache_default.json");
+        }
+        if (!targetCacheFile.exists()) {
+            return;
+        }
+        try {
+            Map<String, String> cacheMap = mapper.readValue(targetCacheFile, new TypeReference<Map<String, String>>() {
+            });
+            if (cacheMap.remove(original) != null) {
+                mapper.writerWithDefaultPrettyPrinter().writeValue(targetCacheFile, cacheMap);
+                System.out.println("Cache entry deleted: " + original);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to delete cache entry: " + e.getMessage());
+        }
+    }
+
+    public void importTranslations(Map<String, String> newTranslations) {
+        if (newTranslations == null || newTranslations.isEmpty())
+            return;
+        ObjectMapper mapper = new ObjectMapper();
+        File targetCacheFile = activeCacheFile;
+        if (targetCacheFile == null) {
+            String gameName = getGameName();
+            targetCacheFile = (gameName != null && !gameName.isEmpty())
+                    ? new File("data/cache_" + gameName + ".json")
+                    : new File("data/cache_default.json");
+        }
+        try {
+            Map<String, String> cacheMap = new java.util.HashMap<>();
+            if (targetCacheFile.exists() && targetCacheFile.length() > 0) {
+                cacheMap = mapper.readValue(targetCacheFile, new TypeReference<Map<String, String>>() {
+                });
+            }
+            cacheMap.putAll(newTranslations);
+            File parentDir = targetCacheFile.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+            mapper.writerWithDefaultPrettyPrinter().writeValue(targetCacheFile, cacheMap);
+            System.out.println("Imported " + newTranslations.size() + " translations to " + targetCacheFile.getPath());
+        } catch (Exception e) {
+            System.err.println("Failed to import translations: " + e.getMessage());
         }
     }
 }

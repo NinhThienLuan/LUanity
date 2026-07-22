@@ -47,6 +47,18 @@ public class TagPreservationTest {
     }
 
     @Test
+    public void testPreserveAndRestoreQuantityPatterns() {
+        TranslateExecutor.TagPreserver preserver = new TranslateExecutor.TagPreserver();
+        String original = "Standard Bullet (MAG) x8, MP7a x2, Submit: Snowball x 20 Owned: 0";
+        String preserved = preserver.preserve(original);
+        assertEquals("Standard Bullet (MAG) [[TAG_0]], MP7a [[TAG_1]], Submit: Snowball [[TAG_2]] Owned: 0", preserved);
+
+        String translated = "Đạn tiêu chuẩn (MAG) [[TAG_0]], MP7a [[TAG_1]], Gửi: Bóng tuyết [[TAG_2]] Sở hữu: 0";
+        String restored = preserver.restore(translated);
+        assertEquals("Đạn tiêu chuẩn (MAG) x8, MP7a x2, Gửi: Bóng tuyết x 20 Sở hữu: 0", restored);
+    }
+
+    @Test
     public void testCacheDeserializationAndSerialization() throws Exception {
         java.io.File tempFile = java.io.File.createTempFile("cache-test", ".json");
         tempFile.deleteOnExit();
@@ -102,5 +114,26 @@ public class TagPreservationTest {
         assertTrue(executor.isRefusalOrJunk("Sorry, but I cannot fulfill the request due to unrelated details."));
         assertFalse(executor.isRefusalOrJunk("Tiếp tục"));
         assertFalse(executor.isRefusalOrJunk("Cài đặt"));
+    }
+
+    @Test
+    public void testImportTranslations() throws Exception {
+        TranslateExecutor executor = new TranslateExecutor(null);
+        java.io.File tempFile = java.io.File.createTempFile("cache-import-test", ".json");
+        tempFile.deleteOnExit();
+        executor.setActiveCacheFile(tempFile);
+
+        java.util.Map<String, String> newTrans = new java.util.HashMap<>();
+        newTrans.put("Start Game", "Bắt đầu");
+        newTrans.put("Settings", "Cài đặt");
+
+        executor.importTranslations(newTrans);
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.Map<String, String> loaded = mapper.readValue(tempFile,
+                new com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, String>>() {
+                });
+        assertEquals("Bắt đầu", loaded.get("Start Game"));
+        assertEquals("Cài đặt", loaded.get("Settings"));
     }
 }
