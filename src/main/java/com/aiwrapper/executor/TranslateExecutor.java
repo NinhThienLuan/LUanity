@@ -38,6 +38,9 @@ public class TranslateExecutor implements BaseExecutor {
     }
 
     private final AiProviderFactory aiFactory;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    private TranslationBatchQueue batchQueue;
     private String promptTemplateString = "Translate the following English game text into Vietnamese according to these rules:\n"
             +
             "1. For single words and phrases: translate literally and precisely (dịch sát nghĩa).\n" +
@@ -45,16 +48,138 @@ public class TranslateExecutor implements BaseExecutor {
             "3. Do not explain, do not write anything else, only return the Vietnamese translation.\n" +
             "4. Preserve placeholders like [[TAG_N]] exactly.\n" +
             "5. Absolutely do not output any conversational filler or unrelated details.\n\n" +
-            "English: Continue\n" +
-            "Vietnamese: Tiếp tục\n\n" +
-            "English: Settings\n" +
-            "Vietnamese: Cài đặt\n\n" +
-            "English: {text}\n" +
-            "Vietnamese:";
+            "English: \"Continue\"\n" +
+            "Vietnamese: \"Tiếp tục\"\n\n" +
+            "English: \"Settings\"\n" +
+            "Vietnamese: \"Cài đặt\"\n\n" +
+            "English: \"{text}\"\n" +
+            "Vietnamese: \"";
 
     public TranslateExecutor(AiProviderFactory aiFactory) {
         this.aiFactory = aiFactory;
         loadPromptTemplate();
+    }
+
+    public java.util.concurrent.CompletableFuture<String> translateSingleAsync(String text,
+            Map<String, Object> options) {
+        if (!proxyActive) {
+            return java.util.concurrent.CompletableFuture.completedFuture(text);
+        }
+        if (text == null || text.trim().isEmpty()) {
+            return java.util.concurrent.CompletableFuture.completedFuture(text);
+        }
+
+        ObjectMapper mapper = new ObjectMapper();
+        Map<String, String> cacheMap = new java.util.HashMap<>();
+        File activeCache = activeCacheFile;
+        File gameCacheFile = null;
+        if (activeCache != null && activeCache.exists()) {
+            try {
+                Map<String, String> loadedActiveCache = mapper.readValue(activeCache,
+                        new TypeReference<Map<String, String>>() {
+                        });
+                cacheMap.putAll(loadedActiveCache);
+                gameCacheFile = activeCache;
+            } catch (Exception e) {
+                // Ignore
+            }
+        } else {
+            String gameName = getGameName();
+            if (gameName != null && !gameName.isEmpty()) {
+                gameCacheFile = new File("data/cache_" + gameName + ".json");
+                if (gameCacheFile.exists()) {
+                    try {
+                        Map<String, String> gameCache = mapper.readValue(gameCacheFile,
+                                new TypeReference<Map<String, String>>() {
+                                });
+                        cacheMap.putAll(gameCache);
+                    } catch (Exception e) {
+                        // Ignore
+                    }
+                }
+            } else {
+                gameCacheFile = new File("data/cache.json");
+            }
+        }
+
+        if (gameCacheFile == null) {
+            String gameName = getGameName();
+            if (gameName != null && !gameName.isEmpty()) {
+                gameCacheFile = new File("data/cache_" + gameName + ".json");
+            } else {
+                gameCacheFile = new File("data/cache.json");
+            }
+        }
+
+        cacheMap.entrySet().removeIf(entry -> isRefusalOrJunk(entry.getValue()));
+
+        if (cacheMap.containsKey(text)) {
+            String cached = cacheMap.get(text);
+            if (listener != null) {
+                listener.onTranslation(text, cached, "Cache", text.length());
+            }
+            return java.util.concurrent.CompletableFuture.completedFuture(cached);
+        }
+
+        File glossaryFile = new File("data/glossary.json");
+        Map<String, String> glossaryMap = new java.util.HashMap<>();
+        if (glossaryFile.exists()) {
+            try {
+                glossaryMap = mapper.readValue(glossaryFile, new TypeReference<Map<String, String>>() {
+                });
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+
+        Map<String, String> matchedGlossary = new java.util.HashMap<>();
+        for (Map.Entry<String, String> entry : glossaryMap.entrySet()) {
+            String key = entry.getKey();
+            if (text.toLowerCase().contains(key.toLowerCase())) {
+                matchedGlossary.put(key, entry.getValue());
+            }
+        }
+
+        TagPreserver preserver = new TagPreserver();
+        String preservedText = preserver.preserve(text);
+
+        final File finalGameCacheFile = gameCacheFile;
+        final Map<String, String> finalCacheMap = cacheMap;
+
+        return batchQueue.queue(text, preservedText, matchedGlossary, preserver, options)
+                .thenApply(translatedValue -> {
+                    String cleaned = cleanRawTranslation(text, translatedValue);
+                    if (isRefusalOrJunk(cleaned)) {
+                        if (listener != null) {
+                            listener.onTranslation(text, text, "AI_Refused", text.length());
+                        }
+                        return text;
+                    }
+                    String restored = preserver.restore(cleaned);
+
+                    finalCacheMap.put(text, restored);
+                    if (finalGameCacheFile != null) {
+                        try {
+                            File parent = finalGameCacheFile.getParentFile();
+                            if (parent != null && !parent.exists()) {
+                                parent.mkdirs();
+                            }
+                            mapper.writerWithDefaultPrettyPrinter().writeValue(finalGameCacheFile, finalCacheMap);
+                        } catch (Exception ex) {
+                            // Ignore
+                        }
+                    }
+
+                    if (listener != null) {
+                        listener.onTranslation(text, restored, "AI", text.length());
+                    }
+                    return restored;
+                }).exceptionally(ex -> {
+                    if (listener != null) {
+                        listener.onTranslation(text, "[ERROR] " + ex.getMessage(), "AI_Error", text.length());
+                    }
+                    return "[ERROR] " + ex.getMessage();
+                });
     }
 
     private void loadPromptTemplate() {

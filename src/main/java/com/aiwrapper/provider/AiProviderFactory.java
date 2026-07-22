@@ -40,4 +40,24 @@ public class AiProviderFactory {
                 throw new IllegalArgumentException("Unsupported AI provider: " + providerName);
         }
     }
+
+    public TranslationProviderConstraints getConstraints() {
+        String providerName = aiConfig.getProvider();
+        if (providerName == null || providerName.trim().isEmpty()) {
+            return aiConfig.getOllama();
+        }
+        switch (providerName.toLowerCase()) {
+            case "gemini":
+                return aiConfig.getGemini();
+            case "googletranslate":
+            case "google":
+                return aiConfig.getGoogletranslate();
+            case "openapi":
+            case "openai":
+                return aiConfig.getOpenapi();
+            case "ollama":
+            default:
+                return aiConfig.getOllama();
+        }
+    }
 }

@@ -18,35 +18,41 @@ public class ProxyController {
     }
 
     @GetMapping("/translate")
-    public ResponseEntity<String> translateGet(
+    public java.util.concurrent.CompletableFuture<ResponseEntity<String>> translateGet(
             @RequestParam(value = "text", required = false) String text,
             @RequestParam(value = "from", required = false) String from,
             @RequestParam(value = "to", required = false) String to) {
         if (!translateExecutor.isProxyActive()) {
-            return ResponseEntity.ok("");
+            return java.util.concurrent.CompletableFuture.completedFuture(ResponseEntity.ok(""));
         }
         if (text == null || text.trim().isEmpty()) {
-            return ResponseEntity.ok("");
+            return java.util.concurrent.CompletableFuture.completedFuture(ResponseEntity.ok(""));
         }
         System.out.println("HTTP GET Proxy request: [" + from + " -> " + to + "] text: " + text);
-        return ResponseEntity.ok(translateExecutor.translateSingle(text, Map.of()));
+        return translateExecutor.translateSingleAsync(text, Map.of())
+                .thenApply(ResponseEntity::ok)
+                .exceptionally(ex -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("[ERROR] " + ex.getMessage()));
     }
 
     @PostMapping("/translate")
-    public ResponseEntity<String> translatePost(
+    public java.util.concurrent.CompletableFuture<ResponseEntity<String>> translatePost(
             @RequestBody(required = false) String rawBody,
             @RequestParam(value = "text", required = false) String textParam) {
         if (!translateExecutor.isProxyActive()) {
-            return ResponseEntity.ok("");
+            return java.util.concurrent.CompletableFuture.completedFuture(ResponseEntity.ok(""));
         }
         String query = textParam;
         if (query == null || query.trim().isEmpty()) {
             query = rawBody;
         }
         if (query == null || query.trim().isEmpty()) {
-            return ResponseEntity.ok("");
+            return java.util.concurrent.CompletableFuture.completedFuture(ResponseEntity.ok(""));
         }
         System.out.println("HTTP POST Proxy request: " + query);
-        return ResponseEntity.ok(translateExecutor.translateSingle(query, Map.of()));
+        return translateExecutor.translateSingleAsync(query, Map.of())
+                .thenApply(ResponseEntity::ok)
+                .exceptionally(ex -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body("[ERROR] " + ex.getMessage()));
     }
 }
