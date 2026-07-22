@@ -1,21 +1,19 @@
 package com.aiwrapper.provider;
 
-import com.aiwrapper.config.AiConfig;
+import com.aiwrapper.config.AiEntity.GoogleTranslate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestTemplate;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class GoogleTranslateProvider implements AiProvider {
-    private final AiConfig.GoogleTranslate config;
+    private final GoogleTranslate config;
     private final RestTemplate restTemplate;
 
-    public GoogleTranslateProvider(AiConfig.GoogleTranslate config) {
+    public GoogleTranslateProvider(GoogleTranslate config) {
         this.config = config;
         this.restTemplate = new RestTemplate();
     }
@@ -65,7 +63,8 @@ public class GoogleTranslateProvider implements AiProvider {
             String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={tl}&dt=t&q={q}";
 
             @SuppressWarnings("unchecked")
-            List<?> response = restTemplate.getForObject(url, List.class, target, textToTranslate);
+            List<?> response = restTemplate.getForObject(url, List.class, target,
+                    textToTranslate);
             if (response != null && !response.isEmpty()) {
                 List<?> outerList = (List<?>) response.get(0);
                 if (outerList != null && !outerList.isEmpty()) {

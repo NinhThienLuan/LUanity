@@ -15,6 +15,34 @@ import java.util.Map;
 @EnableConfigurationProperties(AiConfig.class)
 public class WrapperApplication {
     public static void main(String[] args) {
+        // Load .env file manually if exists
+        java.io.File dotEnv = new java.io.File(".env");
+        if (dotEnv.exists()) {
+            try {
+                java.util.List<String> lines = java.nio.file.Files.readAllLines(dotEnv.toPath(),
+                        java.nio.charset.StandardCharsets.UTF_8);
+                for (String line : lines) {
+                    String trimmed = line.trim();
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                        continue;
+                    }
+                    int eqIdx = trimmed.indexOf('=');
+                    if (eqIdx > 0) {
+                        String key = trimmed.substring(0, eqIdx).trim();
+                        String val = trimmed.substring(eqIdx + 1).trim();
+                        if (val.startsWith("\"") && val.endsWith("\"") && val.length() >= 2) {
+                            val = val.substring(1, val.length() - 1);
+                        } else if (val.startsWith("'") && val.endsWith("'") && val.length() >= 2) {
+                            val = val.substring(1, val.length() - 1);
+                        }
+                        System.setProperty(key, val);
+                    }
+                }
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+
         boolean launchGui = true;
         try (InputStream inputStream = WrapperApplication.class.getResourceAsStream("/application.yml")) {
             if (inputStream != null) {

@@ -3,7 +3,6 @@ package com.aiwrapper.ui;
 import com.aiwrapper.config.AiConfig;
 import com.aiwrapper.config.AppProperties;
 import com.aiwrapper.config.IoProperties;
-import com.aiwrapper.executor.BaseExecutor;
 import com.aiwrapper.executor.ExecutorFactory;
 import com.aiwrapper.executor.TranslateExecutor;
 import javafx.beans.property.SimpleStringProperty;
@@ -136,6 +135,19 @@ public class JavaFxUi {
             }
         }
 
+        // Load saved OpenAPI API key
+        String savedOpenApiKey = "";
+        java.io.File openApiKeyFile = new java.io.File("data/openapi_key.txt");
+        if (openApiKeyFile.exists()) {
+            try {
+                savedOpenApiKey = new String(java.nio.file.Files.readAllBytes(openApiKeyFile.toPath()),
+                        java.nio.charset.StandardCharsets.UTF_8).trim();
+                aiConfig.getOpenapi().setApiKey(savedOpenApiKey);
+            } catch (Exception ex) {
+                // Ignore
+            }
+        }
+
         // Root Container
         VBox root = new VBox(0);
         root.setStyle("-fx-background-color: #0f172a;"); // Slate 900
@@ -200,8 +212,18 @@ public class JavaFxUi {
         // 1. Selector AI Provider
         Label providerLabel = createFormLabel("AI Provider:");
         ComboBox<String> providerSelect = new ComboBox<>(
-                FXCollections.observableArrayList("ollama", "gemini", "googletranslate"));
-        providerSelect.setValue(aiConfig.getProvider() != null ? aiConfig.getProvider() : "ollama");
+                FXCollections.observableArrayList("Ollama", "Gemini", "Google Translate", "OpenAI"));
+
+        String initialProv = aiConfig.getProvider() != null ? aiConfig.getProvider() : "ollama";
+        String matchedVal = "Ollama";
+        if ("gemini".equalsIgnoreCase(initialProv)) {
+            matchedVal = "Gemini";
+        } else if ("googletranslate".equalsIgnoreCase(initialProv) || "google".equalsIgnoreCase(initialProv)) {
+            matchedVal = "Google Translate";
+        } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
+            matchedVal = "OpenAI";
+        }
+        providerSelect.setValue(matchedVal);
         styleDropdown(providerSelect);
 
         javafx.scene.shape.Circle providerStatusDot = new javafx.scene.shape.Circle(5);
@@ -214,10 +236,19 @@ public class JavaFxUi {
         grid.add(providerBox, 1, 0);
 
         // 1b. API Key Row
-        Label apiKeyLabel = createFormLabel("Gemini API Key:");
+        Label apiKeyLabel = createFormLabel("API Key:");
         PasswordField apiKeyField = new PasswordField();
-        apiKeyField.setPromptText("Enter Gemini API Key...");
-        apiKeyField.setText(savedApiKey);
+        apiKeyField.setPromptText("Enter API Key...");
+
+        if ("gemini".equalsIgnoreCase(initialProv)) {
+            apiKeyLabel.setText("Gemini API Key:");
+            apiKeyField.setPromptText("Enter Gemini API Key...");
+            apiKeyField.setText(savedApiKey);
+        } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
+            apiKeyLabel.setText("OpenAPI API Key:");
+            apiKeyField.setPromptText("Enter OpenAPI API Key...");
+            apiKeyField.setText(savedOpenApiKey);
+        }
         apiKeyField.setStyle(
                 "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 8 12; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
         // Health dot checker logic
@@ -254,6 +285,10 @@ public class JavaFxUi {
                 String key = apiKeyField.getText().trim();
                 providerStatusDot.setFill(key.isEmpty() ? javafx.scene.paint.Color.web("#ef4444")
                         : javafx.scene.paint.Color.web("#22c55e"));
+            } else if ("openapi".equalsIgnoreCase(selectedProv) || "openai".equalsIgnoreCase(selectedProv)) {
+                String key = apiKeyField.getText().trim();
+                providerStatusDot.setFill(key.isEmpty() ? javafx.scene.paint.Color.web("#ef4444")
+                        : javafx.scene.paint.Color.web("#22c55e"));
             } else if ("googletranslate".equalsIgnoreCase(selectedProv)) {
                 providerStatusDot.setFill(javafx.scene.paint.Color.web("#22c55e"));
             } else {
@@ -264,23 +299,50 @@ public class JavaFxUi {
         providerSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 aiConfig.setProvider(newVal.toLowerCase());
+                if ("gemini".equalsIgnoreCase(newVal)) {
+                    apiKeyField
+                            .setText(aiConfig.getGemini().getApiKey() != null ? aiConfig.getGemini().getApiKey() : "");
+                    apiKeyLabel.setText("Gemini API Key:");
+                    apiKeyField.setPromptText("Enter Gemini API Key...");
+                } else if ("openapi".equalsIgnoreCase(newVal) || "openai".equalsIgnoreCase(newVal)) {
+                    apiKeyField.setText(
+                            aiConfig.getOpenapi().getApiKey() != null ? aiConfig.getOpenapi().getApiKey() : "");
+                    apiKeyLabel.setText("OpenAPI API Key:");
+                    apiKeyField.setPromptText("Enter OpenAPI API Key...");
+                }
                 checkOllamaHealth.run();
             }
         });
 
         apiKeyField.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
-                aiConfig.getGemini().setApiKey(newVal.trim());
-                try {
-                    java.io.File file = new java.io.File("data/gemini_key.txt");
-                    java.io.File parent = file.getParentFile();
-                    if (parent != null && !parent.exists()) {
-                        parent.mkdirs();
+                String prov = providerSelect.getValue();
+                if ("gemini".equalsIgnoreCase(prov)) {
+                    aiConfig.getGemini().setApiKey(newVal.trim());
+                    try {
+                        java.io.File file = new java.io.File("data/gemini_key.txt");
+                        java.io.File parent = file.getParentFile();
+                        if (parent != null && !parent.exists()) {
+                            parent.mkdirs();
+                        }
+                        java.nio.file.Files.write(file.toPath(),
+                                newVal.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    } catch (Exception ex) {
+                        // Ignore
                     }
-                    java.nio.file.Files.write(file.toPath(),
-                            newVal.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                } catch (Exception ex) {
-                    // Ignore
+                } else if ("openapi".equalsIgnoreCase(prov) || "openai".equalsIgnoreCase(prov)) {
+                    aiConfig.getOpenapi().setApiKey(newVal.trim());
+                    try {
+                        java.io.File file = new java.io.File("data/openapi_key.txt");
+                        java.io.File parent = file.getParentFile();
+                        if (parent != null && !parent.exists()) {
+                            parent.mkdirs();
+                        }
+                        java.nio.file.Files.write(file.toPath(),
+                                newVal.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    } catch (Exception ex) {
+                        // Ignore
+                    }
                 }
                 checkOllamaHealth.run();
             }
@@ -291,11 +353,13 @@ public class JavaFxUi {
         apiKeyLabel.managedProperty().bind(apiKeyLabel.visibleProperty());
         apiKeyField.managedProperty().bind(apiKeyField.visibleProperty());
 
-        javafx.beans.binding.BooleanBinding isGemini = javafx.beans.binding.Bindings.createBooleanBinding(
-                () -> "gemini".equalsIgnoreCase(providerSelect.getValue()),
+        javafx.beans.binding.BooleanBinding needsApiKey = javafx.beans.binding.Bindings.createBooleanBinding(
+                () -> "gemini".equalsIgnoreCase(providerSelect.getValue())
+                        || "openapi".equalsIgnoreCase(providerSelect.getValue())
+                        || "openai".equalsIgnoreCase(providerSelect.getValue()),
                 providerSelect.valueProperty());
-        apiKeyLabel.visibleProperty().bind(isGemini);
-        apiKeyField.visibleProperty().bind(isGemini);
+        apiKeyLabel.visibleProperty().bind(needsApiKey);
+        apiKeyField.visibleProperty().bind(needsApiKey);
 
         grid.add(apiKeyLabel, 0, 1);
         grid.add(apiKeyField, 1, 1);
@@ -312,6 +376,9 @@ public class JavaFxUi {
         if ("gemini".equals(aiConfig.getProvider())) {
             defaultModel = aiConfig.getGemini().getModel();
             modelSelect.setItems(FXCollections.observableArrayList("gemini-1.5-flash", "gemini-1.5-pro"));
+        } else if ("openapi".equals(aiConfig.getProvider()) || "openai".equals(aiConfig.getProvider())) {
+            defaultModel = aiConfig.getOpenapi().getModel();
+            modelSelect.setItems(FXCollections.observableArrayList("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"));
         } else {
             fetchOllamaModels(modelSelect);
         }
@@ -323,6 +390,10 @@ public class JavaFxUi {
                     modelSelect.setItems(FXCollections.observableArrayList("gemini-1.5-flash", "gemini-1.5-pro"));
                     String def = aiConfig.getGemini().getModel();
                     modelSelect.setValue(def != null && !def.isEmpty() ? def : "gemini-1.5-flash");
+                } else if ("openapi".equalsIgnoreCase(newVal) || "openai".equalsIgnoreCase(newVal)) {
+                    modelSelect.setItems(FXCollections.observableArrayList("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"));
+                    String def = aiConfig.getOpenapi().getModel();
+                    modelSelect.setValue(def != null && !def.isEmpty() ? def : "gpt-4o-mini");
                 } else if ("ollama".equalsIgnoreCase(newVal)) {
                     fetchOllamaModels(modelSelect);
                 } else if ("googletranslate".equalsIgnoreCase(newVal)) {
@@ -337,6 +408,8 @@ public class JavaFxUi {
                 String prov = providerSelect.getValue();
                 if ("gemini".equalsIgnoreCase(prov)) {
                     aiConfig.getGemini().setModel(newVal.trim());
+                } else if ("openapi".equalsIgnoreCase(prov) || "openai".equalsIgnoreCase(prov)) {
+                    aiConfig.getOpenapi().setModel(newVal.trim());
                 } else if ("ollama".equalsIgnoreCase(prov)) {
                     aiConfig.getOllama().setModel(newVal.trim());
                 }

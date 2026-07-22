@@ -1,15 +1,15 @@
 package com.aiwrapper.provider;
 
-import com.aiwrapper.config.AiConfig;
+import com.aiwrapper.config.AiEntity.Ollama;
 import org.springframework.web.client.RestTemplate;
 import java.util.HashMap;
 import java.util.Map;
 
 public class OllamaProvider implements AiProvider {
-    private final AiConfig.Ollama config;
+    private final Ollama config;
     private final RestTemplate restTemplate;
 
-    public OllamaProvider(AiConfig.Ollama config) {
+    public OllamaProvider(Ollama config) {
         this.config = config;
         this.restTemplate = new RestTemplate();
     }

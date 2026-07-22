@@ -8,6 +8,7 @@ public class AiProviderFactory {
     private final AiProvider ollamaProvider;
     private final AiProvider geminiProvider;
     private final AiProvider googleTranslateProvider;
+    private final AiProvider openApiProvider;
     private final AiConfig aiConfig;
 
     public AiProviderFactory(AiConfig aiConfig) {
@@ -15,6 +16,7 @@ public class AiProviderFactory {
         this.ollamaProvider = new OllamaProvider(aiConfig.getOllama());
         this.geminiProvider = new GeminiProvider(aiConfig.getGemini());
         this.googleTranslateProvider = new GoogleTranslateProvider(aiConfig.getGoogletranslate());
+        this.openApiProvider = new OpenApiProvider(aiConfig.getOpenapi());
     }
 
     public AiProvider get() {
@@ -31,6 +33,9 @@ public class AiProviderFactory {
             case "googletranslate":
             case "google":
                 return googleTranslateProvider;
+            case "openapi":
+            case "openai":
+                return openApiProvider;
             default:
                 throw new IllegalArgumentException("Unsupported AI provider: " + providerName);
         }

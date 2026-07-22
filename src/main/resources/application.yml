@@ -3,18 +3,22 @@ app:
   gui: true
 
 server:
-  port: 8080
+  port: ${SERVER_PORT:8080}
 
 ai:
-  provider: ollama
+  provider: ${AI_PROVIDER:ollama}
   ollama:
-    url: http://localhost:11434
-    model: gemma2:2b
+    url: ${OLLAMA_URL:http://localhost:11434}
+    model: ${OLLAMA_MODEL:gemma2:2b}
   gemini:
     apiKey: ${GEMINI_API_KEY:}
-    model: gemini-1.5-flash
+    model: ${GEMINI_MODEL:gemini-1.5-flash}
   googletranslate:
     apiKey: ${GOOGLE_TRANSLATE_API_KEY:}
+  openapi:
+    url: ${OPENAPI_URL:https://api.openai.com/v1}
+    apiKey: ${OPENAPI_API_KEY:}
+    model: ${OPENAPI_MODEL:gpt-4o-mini}
 
 io:
   inputDir: ./data/input

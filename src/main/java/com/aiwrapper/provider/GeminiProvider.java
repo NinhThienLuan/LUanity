@@ -1,6 +1,6 @@
 package com.aiwrapper.provider;
 
-import com.aiwrapper.config.AiConfig;
+import com.aiwrapper.config.AiEntity.Gemini;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -10,10 +10,10 @@ import java.util.List;
 import java.util.Map;
 
 public class GeminiProvider implements AiProvider {
-    private final AiConfig.Gemini config;
+    private final Gemini config;
     private final RestTemplate restTemplate;
 
-    public GeminiProvider(AiConfig.Gemini config) {
+    public GeminiProvider(Gemini config) {
         this.config = config;
         this.restTemplate = new RestTemplate();
     }
@@ -26,7 +26,10 @@ public class GeminiProvider implements AiProvider {
         }
 
         String model = config.getModel() != null ? config.getModel() : "gemini-1.5-flash";
-        String url = String.format("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", model, apiKey);
+        String url = String.format(
+                "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+                model,
+                apiKey);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

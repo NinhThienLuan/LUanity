@@ -1,5 +1,9 @@
 package com.aiwrapper.config;
 
+import com.aiwrapper.config.AiEntity.Gemini;
+import com.aiwrapper.config.AiEntity.GoogleTranslate;
+import com.aiwrapper.config.AiEntity.Ollama;
+import com.aiwrapper.config.AiEntity.OpenAPI;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "ai")
@@ -8,6 +12,7 @@ public class AiConfig {
     private Ollama ollama = new Ollama();
     private Gemini gemini = new Gemini();
     private GoogleTranslate googletranslate = new GoogleTranslate();
+    private OpenAPI openapi = new OpenAPI();
 
     public Gemini getGemini() {
         return gemini;
@@ -41,66 +46,11 @@ public class AiConfig {
         this.ollama = ollama;
     }
 
-    public static class Ollama {
-        private String url;
-        private String model;
-        private Double temperature;
-
-        public String getUrl() {
-            return url;
-        }
-
-        public void setUrl(String url) {
-            this.url = url;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
-        }
-
-        public Double getTemperature() {
-            return temperature;
-        }
-
-        public void setTemperature(Double temperature) {
-            this.temperature = temperature;
-        }
+    public OpenAPI getOpenapi() {
+        return openapi;
     }
 
-    public static class Gemini {
-        private String apiKey;
-        private String model;
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
-        }
-    }
-
-    public static class GoogleTranslate {
-        private String apiKey;
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
+    public void setOpenapi(OpenAPI openapi) {
+        this.openapi = openapi;
     }
 }
