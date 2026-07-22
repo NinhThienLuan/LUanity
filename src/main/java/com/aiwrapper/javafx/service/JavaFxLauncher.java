@@ -1,4 +1,4 @@
-package com.aiwrapper.ui;
+package com.aiwrapper.javafx.service;
 
 import com.aiwrapper.WrapperApplication;
 import javafx.application.Application;

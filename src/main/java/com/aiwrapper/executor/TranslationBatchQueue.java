@@ -1,6 +1,5 @@
 package com.aiwrapper.executor;
 
-import com.aiwrapper.provider.AiProvider;
 import com.aiwrapper.provider.AiProviderFactory;
 import com.aiwrapper.provider.RateLimitBackoffHandler;
 import com.aiwrapper.provider.TranslationProviderConstraints;

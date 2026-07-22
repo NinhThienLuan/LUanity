@@ -231,6 +231,12 @@ public class TranslateExecutor implements BaseExecutor {
                 return null;
             java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
                     "(<[^>]+>|\\{[^}]+\\}|\\b\\d+(?:\\.\\d+)?\\s*(?i:km/h|km|kg|lbs|ghz|mhz|hz|mph|fps|sec|ml|oz|px|pt|in|ft|yd|g|l|s|m)\\b|(?i)\\b[xX]\\s*\\d+\\b|\\b\\d+\\s*[xX]\\b)");
+
+            // Bypass preservation if the entire text is just a placeholder/unit itself
+            if (pattern.matcher(text).matches()) {
+                return text;
+            }
+
             java.util.regex.Matcher matcher = pattern.matcher(text);
             StringBuilder sb = new StringBuilder();
             int index = 0;
@@ -246,13 +252,15 @@ public class TranslateExecutor implements BaseExecutor {
         public String restore(String translated) {
             if (translated == null)
                 return null;
+            // Match tag sequence with flexible brackets, asterisks, spacing, and
+            // underscores
             java.util.regex.Pattern pattern = java.util.regex.Pattern
-                    .compile("\\[\\[\\s*[tT][aA][gG]\\s*_?\\s*(\\d+)\\s*\\]\\]");
+                    .compile("([\\[\\]\\*_]*\\s*[\\[\\]\\*_]*[tT][aA][gG]\\s*_?\\s*(\\d+)[\\s\\[\\]\\*]*)");
             java.util.regex.Matcher matcher = pattern.matcher(translated);
             StringBuilder sb = new StringBuilder();
             while (matcher.find()) {
                 try {
-                    int index = Integer.parseInt(matcher.group(1));
+                    int index = Integer.parseInt(matcher.group(2));
                     if (index >= 0 && index < originalTags.size()) {
                         matcher.appendReplacement(sb,
                                 java.util.regex.Matcher.quoteReplacement(originalTags.get(index)));
@@ -458,6 +466,9 @@ public class TranslateExecutor implements BaseExecutor {
         if (text == null || text.trim().isEmpty()) {
             return text;
         }
+        if (shouldBypassTranslation(text)) {
+            return text;
+        }
 
         // Load Hybrid Cache (global cache fallback + game-specific override)
         ObjectMapper mapper = new ObjectMapper();
@@ -499,7 +510,9 @@ public class TranslateExecutor implements BaseExecutor {
 
         if (cacheMap.containsKey(text)) {
             String cached = cacheMap.get(text);
-            if (listener != null) {
+            boolean skipCacheWrite = (options != null && options.containsKey("skipCacheWrite")
+                    && (boolean) options.get("skipCacheWrite"));
+            if (listener != null && !skipCacheWrite) {
                 listener.onTranslation(text, cached, "Cache", text.length());
             }
             return cached;
@@ -587,9 +600,12 @@ public class TranslateExecutor implements BaseExecutor {
                 translated = translated.replaceAll("(?i)\\b" + java.util.regex.Pattern.quote(key) + "\\b", val);
             }
 
+            boolean skipCacheWrite = (options != null && options.containsKey("skipCacheWrite")
+                    && (boolean) options.get("skipCacheWrite"));
+
             // Save Hybrid Cache
             try {
-                if (gameCacheFile != null) {
+                if (gameCacheFile != null && !skipCacheWrite) {
                     Map<String, String> gameCacheMap = new java.util.HashMap<>();
                     if (gameCacheFile.exists()) {
                         try {
@@ -609,7 +625,7 @@ public class TranslateExecutor implements BaseExecutor {
                 // Ignore
             }
 
-            if (listener != null) {
+            if (listener != null && !skipCacheWrite) {
                 boolean exactGlossaryMatch = false;
                 for (String key : matchedGlossary.keySet()) {
                     if (key.equalsIgnoreCase(text)) {
@@ -626,6 +642,14 @@ public class TranslateExecutor implements BaseExecutor {
         }
 
         return translated;
+    }
+
+    private boolean shouldBypassTranslation(String text) {
+        if (text == null)
+            return false;
+        String trimmed = text.trim();
+        return trimmed.matches(
+                "(?i)^[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*((kg|g|l|s|m|h|M|xp|exp|lv|lvl|v|hz|fps|ping|ms|am|pm|sec|min|hr|d|km|km/h|lbs|mph|ml|oz|px|pt|in|ft|yd)\\b[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*)*$");
     }
 
     private String getGameName() {

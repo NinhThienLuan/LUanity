@@ -93,7 +93,6 @@ public class GoogleTranslateProvider implements AiProvider {
                 for (String qText : queryList) {
                     String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={tl}&dt=t&q={q}";
                     try {
-                        @SuppressWarnings("unchecked")
                         List<?> response = restTemplate.getForObject(url, List.class, target, qText);
                         if (response != null && !response.isEmpty()) {
                             List<?> outerList = (List<?>) response.get(0);
@@ -121,7 +120,6 @@ public class GoogleTranslateProvider implements AiProvider {
                 return objectMapper.writeValueAsString(results);
             } else {
                 String url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={tl}&dt=t&q={q}";
-                @SuppressWarnings("unchecked")
                 List<?> response = restTemplate.getForObject(url, List.class, target, textToTranslate);
                 if (response != null && !response.isEmpty()) {
                     List<?> outerList = (List<?>) response.get(0);
