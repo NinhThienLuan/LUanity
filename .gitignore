@@ -38,5 +38,6 @@ Desktop.ini
 
 .agents/
 docs/
+temp/
 
 .env
