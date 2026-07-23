@@ -54,6 +54,15 @@ public class GameHistoryManager {
 
         List<GameEntry> list = load();
 
+        // Preserve existing activePreset if present
+        String existingPreset = null;
+        for (GameEntry e : list) {
+            if (e.getExePath().equalsIgnoreCase(path)) {
+                existingPreset = e.getActivePreset();
+                break;
+            }
+        }
+
         // Remove existing entry for this path (case-insensitive)
         list.removeIf(e -> e.getExePath().equalsIgnoreCase(path));
 
@@ -64,6 +73,7 @@ public class GameHistoryManager {
             rawName = rawName.substring(0, rawName.length() - 4);
         }
         GameEntry entry = new GameEntry(rawName, path, LocalDateTime.now().format(FMT));
+        entry.setActivePreset(existingPreset);
 
         // Prepend (most recent first)
         list.add(0, entry);
@@ -75,6 +85,25 @@ public class GameHistoryManager {
 
         save(list);
         writeActivePath(path);
+    }
+
+    /** Update active preset for a game path directly in history. */
+    public static void updateActivePreset(String exePath, String preset) {
+        if (exePath == null || exePath.trim().isEmpty())
+            return;
+        String path = exePath.trim();
+        List<GameEntry> list = load();
+        boolean updated = false;
+        for (GameEntry entry : list) {
+            if (entry.getExePath().equalsIgnoreCase(path)) {
+                entry.setActivePreset(preset);
+                updated = true;
+                break;
+            }
+        }
+        if (updated) {
+            save(list);
+        }
     }
 
     /** Persist a path as the active game without altering history order. */
@@ -129,6 +158,7 @@ public class GameHistoryManager {
         private String name;
         private String exePath;
         private String lastUsed;
+        private String activePreset;
 
         /** Jackson default constructor */
         public GameEntry() {
@@ -152,6 +182,10 @@ public class GameHistoryManager {
             return lastUsed;
         }
 
+        public String getActivePreset() {
+            return activePreset;
+        }
+
         public void setName(String name) {
             this.name = name;
         }
@@ -162,6 +196,10 @@ public class GameHistoryManager {
 
         public void setLastUsed(String lastUsed) {
             this.lastUsed = lastUsed;
+        }
+
+        public void setActivePreset(String activePreset) {
+            this.activePreset = activePreset;
         }
 
         @Override

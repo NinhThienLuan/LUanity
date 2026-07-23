@@ -2,9 +2,11 @@ package com.aiwrapper.javafx.ui;
 
 import com.aiwrapper.config.AiConfig;
 import com.aiwrapper.executor.TranslateExecutor;
+import javafx.beans.property.SimpleStringProperty;
 import javafx.collections.ObservableList;
 import javafx.geometry.Insets;
 import javafx.scene.control.*;
+import javafx.scene.control.cell.TextFieldTableCell;
 import javafx.scene.layout.*;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
@@ -28,6 +30,7 @@ public class ActionsZoneCard extends VBox {
     private final Runnable onCacheChange;
 
     private ComboBox<GameHistoryManager.GameEntry> gamePathCombo;
+    private ComboBox<String> presetCombo;
     private Button btnToggleProxy;
     private Label lblStatusTextRef; // Expose status text ref for toolbar sync or callback
 
@@ -238,6 +241,28 @@ public class ActionsZoneCard extends VBox {
             } catch (Exception ex) {
                 System.err.println("[ActionsZoneCard] switchGame cache load failed: " + ex.getMessage());
             }
+
+            // Restore active preset from game history
+            try {
+                String restoredPreset = null;
+                List<GameHistoryManager.GameEntry> updated = GameHistoryManager.load();
+                for (GameHistoryManager.GameEntry entry : updated) {
+                    if (entry.getExePath().equalsIgnoreCase(trimmed)) {
+                        restoredPreset = entry.getActivePreset();
+                        break;
+                    }
+                }
+                if (restoredPreset != null && presetCombo.getItems().contains(restoredPreset)) {
+                    presetCombo.setValue(restoredPreset);
+                    translateExecutor.setActivePreset(restoredPreset);
+                } else {
+                    presetCombo.setValue("None");
+                    translateExecutor.setActivePreset(null);
+                }
+            } catch (Exception ex) {
+                System.err.println("[ActionsZoneCard] switchGame restore preset failed: " + ex.getMessage());
+            }
+
             if (onCacheChange != null)
                 onCacheChange.run();
         };
@@ -262,6 +287,44 @@ public class ActionsZoneCard extends VBox {
         });
         HBox gamePathRow = new HBox(8, gamePathCombo, gamePathBrowse);
         VBox gamePathContainer = new VBox(6, gamePathLabel, gamePathRow);
+
+        // Active Theme Preset Selection
+        Label presetLabel = createFormLabel("Active Theme Preset:");
+        presetCombo = new ComboBox<>();
+        presetCombo.setEditable(false);
+        presetCombo.setStyle(
+                "-fx-background-color: #1e293b; -fx-text-fill: white; -fx-prompt-text-fill: #64748b; -fx-background-radius: 6;");
+        presetCombo.setMaxWidth(Double.MAX_VALUE);
+        HBox.setHgrow(presetCombo, Priority.ALWAYS);
+
+        // Initialize preset list
+        presetCombo.getItems().add("None");
+        presetCombo.getItems().addAll(translateExecutor.listPresets());
+        presetCombo.setValue("None");
+
+        presetCombo.setOnShowing(evt -> {
+            String currentSelected = presetCombo.getValue();
+            List<String> presets = translateExecutor.listPresets();
+            presetCombo.getItems().clear();
+            presetCombo.getItems().add("None");
+            presetCombo.getItems().addAll(presets);
+            if (currentSelected != null && presetCombo.getItems().contains(currentSelected)) {
+                presetCombo.setValue(currentSelected);
+            } else {
+                presetCombo.setValue("None");
+            }
+        });
+
+        presetCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+            String p = (newVal == null || newVal.equals("None")) ? null : newVal;
+            translateExecutor.setActivePreset(p);
+            String activeGamePath = getGamePath();
+            if (!activeGamePath.isEmpty()) {
+                GameHistoryManager.updateActivePreset(activeGamePath, p);
+            }
+        });
+
+        VBox presetContainer = new VBox(6, presetLabel, presetCombo);
 
         // BepInEx Shortcut Buttons Box
         Label shortcutTitle = createFormLabel("BepInEx Utilities:");
@@ -516,11 +579,46 @@ public class ActionsZoneCard extends VBox {
         shortcutBox.setPadding(new Insets(4, 0, 10, 0));
         VBox shortcutContainer = new VBox(6, shortcutTitle, shortcutBox);
 
-        getChildren().addAll(zoneBTitle, btnToggleProxy, resBtns, gamePathContainer, shortcutContainer);
+        getChildren().addAll(zoneBTitle, btnToggleProxy, resBtns, gamePathContainer, presetContainer,
+                shortcutContainer);
+    }
+
+    public static class GlossaryRow {
+        private final SimpleStringProperty original;
+        private final SimpleStringProperty translated;
+
+        public GlossaryRow(String original, String translated) {
+            this.original = new SimpleStringProperty(original);
+            this.translated = new SimpleStringProperty(translated);
+        }
+
+        public String getOriginal() {
+            return original.get();
+        }
+
+        public void setOriginal(String val) {
+            this.original.set(val);
+        }
+
+        public SimpleStringProperty originalProperty() {
+            return original;
+        }
+
+        public String getTranslated() {
+            return translated.get();
+        }
+
+        public void setTranslated(String val) {
+            this.translated.set(val);
+        }
+
+        public SimpleStringProperty translatedProperty() {
+            return translated;
+        }
     }
 
     private void openGlossaryDialog() {
-        Dialog<String> dialog = new Dialog<>();
+        Dialog<Map<String, String>> dialog = new Dialog<>();
         dialog.setTitle("Edit Glossary");
         File cssFile = new File("data/ui_style.css");
         if (cssFile.exists()) {
@@ -530,65 +628,74 @@ public class ActionsZoneCard extends VBox {
         ButtonType saveButtonType = new ButtonType("Save", ButtonBar.ButtonData.OK_DONE);
         dialog.getDialogPane().getButtonTypes().addAll(saveButtonType, ButtonType.CANCEL);
 
-        StringBuilder glossaryBuilder = new StringBuilder();
-        File glossaryFile = new File("data/glossary.json");
-        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        if (glossaryFile.exists()) {
-            try {
-                Map<String, String> map = mapper.readValue(glossaryFile,
-                        new com.fasterxml.jackson.core.type.TypeReference<Map<String, String>>() {
-                        });
-                for (Map.Entry<String, String> entry : map.entrySet()) {
-                    glossaryBuilder.append(entry.getKey()).append("=").append(entry.getValue()).append("\n");
-                }
-            } catch (Exception ex) {
-                System.err.println("Failed to read glossary.json: " + ex.getMessage());
-            }
+        TableView<GlossaryRow> tableView = new TableView<>();
+        tableView.setEditable(true);
+        tableView.setPrefWidth(450);
+        tableView.setPrefHeight(300);
+
+        TableColumn<GlossaryRow, String> colOriginal = new TableColumn<>("Từ gốc (English)");
+        colOriginal.setCellValueFactory(cellData -> cellData.getValue().originalProperty());
+        colOriginal.setCellFactory(TextFieldTableCell.forTableColumn());
+        colOriginal.setOnEditCommit(evt -> evt.getRowValue().setOriginal(evt.getNewValue()));
+        colOriginal.setPrefWidth(210);
+
+        TableColumn<GlossaryRow, String> colTranslated = new TableColumn<>("Nghĩa dịch (Vietnamese)");
+        colTranslated.setCellValueFactory(cellData -> cellData.getValue().translatedProperty());
+        colTranslated.setCellFactory(TextFieldTableCell.forTableColumn());
+        colTranslated.setOnEditCommit(evt -> evt.getRowValue().setTranslated(evt.getNewValue()));
+        colTranslated.setPrefWidth(210);
+
+        tableView.getColumns().add(colOriginal);
+        tableView.getColumns().add(colTranslated);
+
+        javafx.collections.ObservableList<GlossaryRow> data = javafx.collections.FXCollections.observableArrayList();
+        Map<String, String> glossaryMap = translateExecutor.loadGlossaryMap();
+        for (Map.Entry<String, String> entry : glossaryMap.entrySet()) {
+            data.add(new GlossaryRow(entry.getKey(), entry.getValue()));
         }
+        tableView.setItems(data);
 
-        Label desc = new Label(
-                "Add terminology mapping dictionary (one pair per line):\nFormat: EnglishWord=VietnameseTranslation");
-        desc.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
+        Button btnAdd = createSecondaryButton("+ Thêm dòng");
+        btnAdd.setOnAction(evt -> {
+            GlossaryRow newRow = new GlossaryRow("NewWord", "Nghĩa");
+            data.add(newRow);
+            tableView.getSelectionModel().select(newRow);
+            tableView.scrollTo(newRow);
+        });
 
-        TextArea textArea = new TextArea(glossaryBuilder.toString());
-        textArea.setWrapText(true);
-        textArea.setPrefWidth(450);
-        textArea.setPrefHeight(250);
+        Button btnDelete = createSecondaryButton("Xóa dòng");
+        btnDelete.setOnAction(evt -> {
+            GlossaryRow selected = tableView.getSelectionModel().getSelectedItem();
+            if (selected != null) {
+                data.remove(selected);
+            }
+        });
 
-        VBox vbox = new VBox(10, desc, textArea);
+        HBox editControlBar = new HBox(8, btnAdd, btnDelete);
+        VBox vbox = new VBox(10, editControlBar, tableView);
         vbox.setPadding(new Insets(10));
         dialog.getDialogPane().setContent(vbox);
 
         dialog.setResultConverter(dialogButton -> {
             if (dialogButton == saveButtonType) {
-                return textArea.getText();
+                Map<String, String> newMap = new java.util.LinkedHashMap<>();
+                for (GlossaryRow row : data) {
+                    if (row.getOriginal() != null && row.getTranslated() != null) {
+                        String orig = row.getOriginal().trim();
+                        String trans = row.getTranslated().trim();
+                        if (!orig.isEmpty() && !trans.isEmpty()) {
+                            newMap.put(orig, trans);
+                        }
+                    }
+                }
+                return newMap;
             }
             return null;
         });
 
-        dialog.showAndWait().ifPresent(content -> {
-            Map<String, String> newMap = new java.util.LinkedHashMap<>();
-            String[] lines = content.split("\\r?\\n");
-            for (String line : lines) {
-                int eqIdx = line.indexOf('=');
-                if (eqIdx > 0) {
-                    String key = line.substring(0, eqIdx).trim();
-                    String val = line.substring(eqIdx + 1).trim();
-                    if (!key.isEmpty() && !val.isEmpty()) {
-                        newMap.put(key, val);
-                    }
-                }
-            }
-            try {
-                File parent = glossaryFile.getParentFile();
-                if (parent != null && !parent.exists()) {
-                    parent.mkdirs();
-                }
-                mapper.writerWithDefaultPrettyPrinter().writeValue(glossaryFile, newMap);
-                System.out.println("Glossary saved to data/glossary.json successfully.");
-            } catch (Exception ex) {
-                System.err.println("Failed to write glossary.json: " + ex.getMessage());
-            }
+        dialog.showAndWait().ifPresent(newMap -> {
+            translateExecutor.saveGlossaryMap(newMap);
+            System.out.println("Glossary saved successfully.");
         });
     }
 

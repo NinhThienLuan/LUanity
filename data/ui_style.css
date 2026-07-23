@@ -104,6 +104,10 @@
     -fx-text-fill: #e2e8f0;
 }
 
+.table-view .table-cell {
+    -fx-text-fill: #e2e8f0;
+}
+
 .table-view .table-row-cell:odd {
     -fx-background-color: #0d1321;
 }
@@ -114,6 +118,10 @@
 
 .table-view .table-row-cell:filled:selected {
     -fx-background-color: #1e293b;
+    -fx-text-fill: #06b6d4;
+}
+
+.table-view .table-row-cell:filled:selected .table-cell {
     -fx-text-fill: #06b6d4;
 }
 

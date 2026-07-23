@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Component
 public class TranslateExecutor implements BaseExecutor {
@@ -24,6 +25,12 @@ public class TranslateExecutor implements BaseExecutor {
 
     private TranslationListener listener;
     private File activeCacheFile = null;
+
+    // Glossary/Preset thread-safe caching and resolution state
+    private final ReentrantReadWriteLock glossaryLock = new ReentrantReadWriteLock();
+    private Map<String, String> cachedGlossaryMap = null;
+    private long lastGlossaryMtime = -1;
+    private String activePresetName = null;
 
     public void setTranslationListener(TranslationListener listener) {
         this.listener = listener;
@@ -122,16 +129,16 @@ public class TranslateExecutor implements BaseExecutor {
             return java.util.concurrent.CompletableFuture.completedFuture(cached);
         }
 
-        File glossaryFile = new File("data/glossary.json");
-        Map<String, String> glossaryMap = new java.util.HashMap<>();
-        if (glossaryFile.exists()) {
-            try {
-                glossaryMap = mapper.readValue(glossaryFile, new TypeReference<Map<String, String>>() {
-                });
-            } catch (Exception e) {
-                // Ignore
+        // Exact match check:
+        GlossaryMatchResult exactMatch = findExactGlossaryMatch(text, activePresetName);
+        if (exactMatch != null && !bypassCache) {
+            if (listener != null) {
+                listener.onTranslation(text, exactMatch.value, exactMatch.type, text.length());
             }
+            return java.util.concurrent.CompletableFuture.completedFuture(exactMatch.value);
         }
+
+        Map<String, String> glossaryMap = resolveActiveGlossary(activePresetName);
 
         Map<String, String> matchedGlossary = new java.util.HashMap<>();
         for (Map.Entry<String, String> entry : glossaryMap.entrySet()) {
@@ -318,16 +325,7 @@ public class TranslateExecutor implements BaseExecutor {
         }
 
         // Load Glossary
-        File glossaryFile = new File("data/glossary.json");
-        Map<String, String> glossaryMap = new java.util.HashMap<>();
-        if (glossaryFile.exists()) {
-            try {
-                glossaryMap = mapper.readValue(glossaryFile, new TypeReference<Map<String, String>>() {
-                });
-            } catch (Exception e) {
-                System.err.println("Warning: Could not read glossary: " + e.getMessage());
-            }
-        }
+        Map<String, String> glossaryMap = resolveActiveGlossary(activePresetName);
 
         // Get template options override
         PromptTemplate activeTemplate = new PromptTemplate(
@@ -517,17 +515,19 @@ public class TranslateExecutor implements BaseExecutor {
             return cached;
         }
 
-        // Load Glossary
-        File glossaryFile = new File("data/glossary.json");
-        Map<String, String> glossaryMap = new java.util.HashMap<>();
-        if (glossaryFile.exists()) {
-            try {
-                glossaryMap = mapper.readValue(glossaryFile, new TypeReference<Map<String, String>>() {
-                });
-            } catch (Exception e) {
-                // Ignore
+        // Exact match check:
+        GlossaryMatchResult exactMatch = findExactGlossaryMatch(text, activePresetName);
+        if (exactMatch != null) {
+            boolean skipCacheWrite = (options != null && options.containsKey("skipCacheWrite")
+                    && (boolean) options.get("skipCacheWrite"));
+            if (listener != null && !skipCacheWrite) {
+                listener.onTranslation(text, exactMatch.value, exactMatch.type, text.length());
             }
+            return exactMatch.value;
         }
+
+        // Load Glossary
+        Map<String, String> glossaryMap = resolveActiveGlossary(activePresetName);
 
         // Find matched glossary entries
         Map<String, String> matchedGlossary = new java.util.HashMap<>();
@@ -804,11 +804,158 @@ public class TranslateExecutor implements BaseExecutor {
         }
     }
 
+    public void setActivePreset(String presetName) {
+        this.activePresetName = (presetName == null || presetName.trim().isEmpty()
+                || presetName.equalsIgnoreCase("None")) ? null : presetName.trim();
+    }
+
+    public String getActivePreset() {
+        return activePresetName;
+    }
+
+    public Map<String, String> loadGlossaryMap() {
+        File glossaryFile = new File("data/glossary.json");
+        glossaryLock.readLock().lock();
+        try {
+            if (cachedGlossaryMap != null && glossaryFile.exists()
+                    && glossaryFile.lastModified() == lastGlossaryMtime) {
+                return cachedGlossaryMap;
+            }
+        } finally {
+            glossaryLock.readLock().unlock();
+        }
+
+        glossaryLock.writeLock().lock();
+        try {
+            if (cachedGlossaryMap != null && glossaryFile.exists()
+                    && glossaryFile.lastModified() == lastGlossaryMtime) {
+                return cachedGlossaryMap;
+            }
+            if (glossaryFile.exists()) {
+                try {
+                    ObjectMapper mapper = new ObjectMapper();
+                    cachedGlossaryMap = mapper.readValue(glossaryFile, new TypeReference<Map<String, String>>() {
+                    });
+                    lastGlossaryMtime = glossaryFile.lastModified();
+                } catch (Exception e) {
+                    System.err.println("Warning: failed to load glossary: " + e.getMessage());
+                    cachedGlossaryMap = new java.util.HashMap<>();
+                }
+            } else {
+                cachedGlossaryMap = new java.util.HashMap<>();
+                lastGlossaryMtime = -1;
+            }
+            return cachedGlossaryMap;
+        } finally {
+            glossaryLock.writeLock().unlock();
+        }
+    }
+
+    public List<String> listPresets() {
+        File presetsDir = new File("data/presets");
+        List<String> list = new ArrayList<>();
+        if (presetsDir.exists() && presetsDir.isDirectory()) {
+            File[] files = presetsDir.listFiles(f -> f.isFile() && f.getName().toLowerCase().endsWith(".json"));
+            if (files != null) {
+                for (File f : files) {
+                    String name = f.getName();
+                    list.add(name.substring(0, name.length() - 5)); // remove .json
+                }
+            }
+        }
+        return list;
+    }
+
+    public Map<String, String> loadPreset(String presetName) {
+        if (presetName == null || presetName.isEmpty()) {
+            return new java.util.HashMap<>();
+        }
+        File presetFile = new File("data/presets/" + presetName + ".json");
+        if (presetFile.exists()) {
+            try {
+                ObjectMapper mapper = new ObjectMapper();
+                return mapper.readValue(presetFile, new TypeReference<Map<String, String>>() {
+                });
+            } catch (Exception e) {
+                System.err.println("Warning: failed to load preset " + presetName + ": " + e.getMessage());
+            }
+        }
+        return new java.util.HashMap<>();
+    }
+
+    public Map<String, String> resolveActiveGlossary(String activePreset) {
+        Map<String, String> globalGlossary = loadGlossaryMap();
+        Map<String, String> resolved = new LinkedHashMap<>(globalGlossary);
+        if (activePreset != null) {
+            resolved.putAll(loadPreset(activePreset));
+        }
+        return resolved;
+    }
+
+    public static class GlossaryMatchResult {
+        public final String value;
+        public final String type;
+
+        public GlossaryMatchResult(String value, String type) {
+            this.value = value;
+            this.type = type;
+        }
+    }
+
+    public GlossaryMatchResult findExactGlossaryMatch(String text, String activePreset) {
+        if (text == null)
+            return null;
+        String trimmed = text.trim();
+        if (trimmed.isEmpty())
+            return null;
+
+        if (activePreset != null) {
+            Map<String, String> presetMap = loadPreset(activePreset);
+            for (Map.Entry<String, String> entry : presetMap.entrySet()) {
+                if (entry.getKey().equalsIgnoreCase(trimmed)) {
+                    return new GlossaryMatchResult(entry.getValue(), "Preset");
+                }
+            }
+        }
+
+        Map<String, String> globalGlossary = loadGlossaryMap();
+        for (Map.Entry<String, String> entry : globalGlossary.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(trimmed)) {
+                return new GlossaryMatchResult(entry.getValue(), "Glossary");
+            }
+        }
+
+        return null;
+    }
+
+    public void saveGlossaryMap(Map<String, String> newMap) {
+        if (newMap == null)
+            return;
+        ObjectMapper mapper = new ObjectMapper();
+        File glossaryFile = new File("data/glossary.json");
+        glossaryLock.writeLock().lock();
+        try {
+            File parentDir = glossaryFile.getParentFile();
+            if (parentDir != null && !parentDir.exists()) {
+                parentDir.mkdirs();
+            }
+            mapper.writerWithDefaultPrettyPrinter().writeValue(glossaryFile, newMap);
+            cachedGlossaryMap = null;
+            lastGlossaryMtime = -1;
+            System.out.println("Glossary JSON map saved successfully in batch: " + newMap.size() + " entries.");
+        } catch (Exception e) {
+            System.err.println("Failed to batch save glossary map: " + e.getMessage());
+        } finally {
+            glossaryLock.writeLock().unlock();
+        }
+    }
+
     public void updateGlossaryValue(String original, String translated) {
         if (original == null || translated == null)
             return;
         ObjectMapper mapper = new ObjectMapper();
         File glossaryFile = new File("data/glossary.json");
+        glossaryLock.writeLock().lock();
         try {
             Map<String, String> glossaryMap = new java.util.HashMap<>();
             if (glossaryFile.exists()) {
@@ -821,9 +968,13 @@ public class TranslateExecutor implements BaseExecutor {
                 parentDir.mkdirs();
             }
             mapper.writerWithDefaultPrettyPrinter().writeValue(glossaryFile, glossaryMap);
+            cachedGlossaryMap = null;
+            lastGlossaryMtime = -1;
             System.out.println("Glossary entry updated: " + original + " -> " + translated);
         } catch (Exception e) {
             System.err.println("Failed to update glossary: " + e.getMessage());
+        } finally {
+            glossaryLock.writeLock().unlock();
         }
     }
 
