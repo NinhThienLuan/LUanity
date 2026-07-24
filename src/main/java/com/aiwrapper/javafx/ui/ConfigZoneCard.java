@@ -21,8 +21,6 @@ import javafx.stage.Stage;
 import java.io.File;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -82,57 +80,7 @@ public class ConfigZoneCard extends VBox {
         ColumnConstraints col2 = new ColumnConstraints(280);
         grid.getColumnConstraints().addAll(col1, col2);
 
-        // 1. AI Provider selector
-        Label providerLabel = createFormLabel("AI Provider:");
-        providerSelect = new ComboBox<>(
-                FXCollections.observableArrayList("Ollama", "Gemini", "Google Translate", "OpenAI"));
         String initialProv = aiConfig.getProvider() != null ? aiConfig.getProvider() : "ollama";
-        String matchedVal = "Ollama";
-        if ("gemini".equalsIgnoreCase(initialProv)) {
-            matchedVal = "Gemini";
-        } else if ("googletranslate".equalsIgnoreCase(initialProv) || "google".equalsIgnoreCase(initialProv)) {
-            matchedVal = "Google Translate";
-        } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
-            matchedVal = "OpenAI";
-        }
-        providerSelect.setValue(matchedVal);
-        styleDropdown(providerSelect);
-
-        providerStatusDot = new Circle(5);
-        providerStatusDot.setFill(Color.GRAY);
-
-        Button btnOpenTestApi = new Button("🧪 Test API");
-        btnOpenTestApi.setStyle(
-                "-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-background-radius: 6; -fx-font-weight: bold; -fx-padding: 4 10; -fx-cursor: hand;");
-        btnOpenTestApi.setOnMouseEntered(e -> btnOpenTestApi.setStyle(
-                "-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 6; -fx-font-weight: bold; -fx-padding: 4 10; -fx-cursor: hand;"));
-        btnOpenTestApi.setOnMouseExited(e -> btnOpenTestApi.setStyle(
-                "-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-background-radius: 6; -fx-font-weight: bold; -fx-padding: 4 10; -fx-cursor: hand;"));
-
-        btnOpenTestApi.setOnAction(e -> ApiTestDialog.show(stage, aiConfig, aiFactory, translateExecutor));
-
-        HBox providerHbox = new HBox(8);
-        providerHbox.setAlignment(Pos.CENTER_LEFT);
-        providerHbox.getChildren().addAll(providerSelect, providerStatusDot, btnOpenTestApi);
-
-        grid.add(providerLabel, 0, 0);
-        grid.add(providerHbox, 1, 0);
-
-        // 1b. API Key label/field
-        apiKeyLabel = createFormLabel("API Key:");
-        apiKeyField = new PasswordField();
-        apiKeyField.setPromptText("Enter API Key...");
-        if ("gemini".equalsIgnoreCase(initialProv)) {
-            apiKeyLabel.setText("Gemini API Key:");
-            apiKeyField.setPromptText("Enter Gemini API Key...");
-            apiKeyField.setText(savedApiKey);
-        } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
-            apiKeyLabel.setText("OpenAPI API Key:");
-            apiKeyField.setPromptText("Enter OpenAPI API Key...");
-            apiKeyField.setText(savedOpenApiKey);
-        }
-        apiKeyField.setStyle(
-                "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 8 12; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
 
         Runnable checkOllamaHealth = () -> {
             providerStatusDot.setFill(Color.GRAY);
@@ -175,6 +123,73 @@ public class ConfigZoneCard extends VBox {
             }
         };
 
+        // 1. AI Provider & API Key
+        buildProviderSection(grid, initialProv, checkOllamaHealth);
+
+        // 2. Model Selection
+        buildModelSection(grid);
+
+        // 3. Slider Temperature
+        buildTemperatureSection(grid);
+
+        // 4. Language Pair
+        buildLanguagePairSection(grid);
+
+        Platform.runLater(checkOllamaHealth);
+
+        getChildren().addAll(zoneATitle, grid);
+    }
+
+    private void buildProviderSection(GridPane grid, String initialProv, Runnable checkOllamaHealth) {
+        Label providerLabel = UiStyles.createFormLabel("AI Provider:");
+        providerSelect = new ComboBox<>(
+                FXCollections.observableArrayList("Ollama", "Gemini", "Google Translate", "OpenAI"));
+        String matchedVal = "Ollama";
+        if ("gemini".equalsIgnoreCase(initialProv)) {
+            matchedVal = "Gemini";
+        } else if ("googletranslate".equalsIgnoreCase(initialProv) || "google".equalsIgnoreCase(initialProv)) {
+            matchedVal = "Google Translate";
+        } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
+            matchedVal = "OpenAI";
+        }
+        providerSelect.setValue(matchedVal);
+        UiStyles.styleDropdown(providerSelect);
+
+        providerStatusDot = new Circle(5);
+        providerStatusDot.setFill(Color.GRAY);
+
+        Button btnOpenTestApi = new Button("🧪 Test API");
+        btnOpenTestApi.setStyle(
+                "-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-background-radius: 6; -fx-font-weight: bold; -fx-padding: 4 10; -fx-cursor: hand;");
+        btnOpenTestApi.setOnMouseEntered(e -> btnOpenTestApi.setStyle(
+                "-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 6; -fx-font-weight: bold; -fx-padding: 4 10; -fx-cursor: hand;"));
+        btnOpenTestApi.setOnMouseExited(e -> btnOpenTestApi.setStyle(
+                "-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-background-radius: 6; -fx-font-weight: bold; -fx-padding: 4 10; -fx-cursor: hand;"));
+
+        btnOpenTestApi.setOnAction(e -> ApiTestDialog.show(stage, aiConfig, aiFactory, translateExecutor));
+
+        HBox providerHbox = new HBox(8);
+        providerHbox.setAlignment(Pos.CENTER_LEFT);
+        providerHbox.getChildren().addAll(providerSelect, providerStatusDot, btnOpenTestApi);
+
+        grid.add(providerLabel, 0, 0);
+        grid.add(providerHbox, 1, 0);
+
+        apiKeyLabel = UiStyles.createFormLabel("API Key:");
+        apiKeyField = new PasswordField();
+        apiKeyField.setPromptText("Enter API Key...");
+        if ("gemini".equalsIgnoreCase(initialProv)) {
+            apiKeyLabel.setText("Gemini API Key:");
+            apiKeyField.setPromptText("Enter Gemini API Key...");
+            apiKeyField.setText(savedApiKey);
+        } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
+            apiKeyLabel.setText("OpenAPI API Key:");
+            apiKeyField.setPromptText("Enter OpenAPI API Key...");
+            apiKeyField.setText(savedOpenApiKey);
+        }
+        apiKeyField.setStyle(
+                "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 8 12; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
+
         providerSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 aiConfig.setProvider(newVal.toLowerCase());
@@ -209,8 +224,6 @@ public class ConfigZoneCard extends VBox {
             }
         });
 
-        Platform.runLater(checkOllamaHealth);
-
         apiKeyLabel.managedProperty().bind(apiKeyLabel.visibleProperty());
         apiKeyField.managedProperty().bind(apiKeyField.visibleProperty());
 
@@ -224,9 +237,10 @@ public class ConfigZoneCard extends VBox {
 
         grid.add(apiKeyLabel, 0, 1);
         grid.add(apiKeyField, 1, 1);
+    }
 
-        // 2. Model ComboBox
-        Label modelLabel = createFormLabel("Model:");
+    private void buildModelSection(GridPane grid) {
+        Label modelLabel = UiStyles.createFormLabel("Model:");
         modelSelect = new ComboBox<>();
         modelSelect.setEditable(true);
         modelSelect.setMaxWidth(Double.MAX_VALUE);
@@ -279,9 +293,10 @@ public class ConfigZoneCard extends VBox {
 
         grid.add(modelLabel, 0, 2);
         grid.add(modelSelect, 1, 2);
+    }
 
-        // 3. Slider Temperature
-        Label tempLabel = createFormLabel("Temperature (0.1-1):");
+    private void buildTemperatureSection(GridPane grid) {
+        Label tempLabel = UiStyles.createFormLabel("Temperature (0.1-1):");
         Slider tempSlider = new Slider(0.1, 1.0, 0.2);
         tempSlider.setShowTickLabels(true);
         tempSlider.setShowTickMarks(true);
@@ -318,12 +333,13 @@ public class ConfigZoneCard extends VBox {
 
         grid.add(tempLabel, 0, 3);
         grid.add(tempBox, 1, 3);
+    }
 
-        // 4. Language Pair
-        Label langLabel = createFormLabel("Language Pair:");
+    private void buildLanguagePairSection(GridPane grid) {
+        Label langLabel = UiStyles.createFormLabel("Language Pair:");
         langSelect = new ComboBox<>(FXCollections.observableArrayList("EN/VI", "ZH/VI", "JA/VI", "KO/VI"));
         langSelect.setValue("EN/VI");
-        styleDropdown(langSelect);
+        UiStyles.styleDropdown(langSelect);
         langSelect.setMaxWidth(Double.MAX_VALUE);
 
         // Load saved state (from current app_config.json)
@@ -349,7 +365,8 @@ public class ConfigZoneCard extends VBox {
                 String activePath = GameHistoryManager.loadActivePath();
                 if (activePath != null && !activePath.isEmpty()) {
                     GameHistoryManager.updateLanguagePair(activePath, newVal);
-                    updateAutoTranslatorLanguages(new File(activePath).getParentFile(), translateExecutor.getFromLang(),
+                    AutoTranslatorConfigWriter.updateAutoTranslatorLanguages(new File(activePath).getParentFile(),
+                            translateExecutor.getFromLang(),
                             translateExecutor.getToLang());
                 }
             }
@@ -357,74 +374,12 @@ public class ConfigZoneCard extends VBox {
 
         grid.add(langLabel, 0, 4);
         grid.add(langSelect, 1, 4);
-
-        getChildren().addAll(zoneATitle, grid);
     }
 
     public void selectLanguagePair(String languagePair) {
         if (languagePair != null && !languagePair.isEmpty() && langSelect != null) {
             langSelect.setValue(languagePair);
             translateExecutor.setLanguagePair(languagePair);
-        }
-    }
-
-    private void updateAutoTranslatorLanguages(File gameRoot, String fromLang, String targetLang) {
-        File configDir = new File(gameRoot, "BepInEx/config");
-        File configFile = new File(configDir, "AutoTranslatorConfig.ini");
-        if (!configFile.exists()) {
-            return;
-        }
-        try {
-            List<String> lines = Files.readAllLines(configFile.toPath(), StandardCharsets.UTF_8);
-            List<String> output = new java.util.ArrayList<>();
-            boolean generalBlock = false;
-            boolean hasLanguage = false;
-            boolean hasFromLanguage = false;
-
-            for (String line : lines) {
-                String trimmed = line.trim();
-                if (trimmed.equals("[General]")) {
-                    generalBlock = true;
-                    output.add(line);
-                    continue;
-                } else if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-                    generalBlock = false;
-                }
-
-                if (generalBlock) {
-                    if (trimmed.startsWith("Language=")) {
-                        output.add("Language=" + targetLang);
-                        hasLanguage = true;
-                    } else if (trimmed.startsWith("FromLanguage=")) {
-                        output.add("FromLanguage=" + fromLang);
-                        hasFromLanguage = true;
-                    } else {
-                        output.add(line);
-                    }
-                } else {
-                    output.add(line);
-                }
-            }
-
-            if (!hasLanguage || !hasFromLanguage) {
-                for (int i = 0; i < output.size(); i++) {
-                    if (output.get(i).trim().equals("[General]")) {
-                        if (!hasLanguage) {
-                            output.add(i + 1, "Language=" + targetLang);
-                        }
-                        if (!hasFromLanguage) {
-                            output.add(i + 1, "FromLanguage=" + fromLang);
-                        }
-                        break;
-                    }
-                }
-            }
-
-            Files.write(configFile.toPath(), output, StandardCharsets.UTF_8);
-            System.out.println("[ConfigZoneCard] Updated AutoTranslatorConfig.ini language pair: " + fromLang + " -> "
-                    + targetLang);
-        } catch (Exception ex) {
-            System.err.println("[ConfigZoneCard] Failed to update AutoTranslatorConfig.ini: " + ex.getMessage());
         }
     }
 
@@ -482,17 +437,5 @@ public class ConfigZoneCard extends VBox {
         });
 
         new Thread(fetchTask).start();
-    }
-
-    private Label createFormLabel(String text) {
-        Label label = new Label(text);
-        label.setTextFill(Color.web("#e2e8f0"));
-        label.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 13));
-        return label;
-    }
-
-    private void styleDropdown(ComboBox<String> cb) {
-        cb.setMaxWidth(Double.MAX_VALUE);
-        cb.setStyle("-fx-background-color: #1e293b; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 4 8;");
     }
 }

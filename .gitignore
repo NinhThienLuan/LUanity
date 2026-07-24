@@ -39,5 +39,6 @@ Desktop.ini
 .agents/
 docs/
 temp/
+data/
 
 .env
