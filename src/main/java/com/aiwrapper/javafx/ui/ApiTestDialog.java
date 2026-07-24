@@ -65,6 +65,32 @@ public class ApiTestDialog {
         Label provLabel = createFormLabel("AI Provider:");
         ComboBox<String> provSelect = new ComboBox<>(
                 FXCollections.observableArrayList("Ollama", "Gemini", "Google Translate", "OpenAI"));
+        Label modelLabel = createFormLabel("Model:");
+        ComboBox<String> modelSelect = new ComboBox<>();
+        modelSelect.setEditable(true);
+        modelSelect.setMaxWidth(Double.MAX_VALUE);
+        modelSelect.setStyle(
+                "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 4 8; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
+        grid.add(modelLabel, 0, 1);
+        grid.add(modelSelect, 1, 1);
+
+        provSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null) {
+                if ("gemini".equalsIgnoreCase(newVal)) {
+                    modelSelect.setItems(FXCollections.observableArrayList("gemini-1.5-flash", "gemini-1.5-pro"));
+                    modelSelect.setValue("gemini-1.5-flash");
+                } else if ("openapi".equalsIgnoreCase(newVal) || "openai".equalsIgnoreCase(newVal)) {
+                    modelSelect.setItems(FXCollections.observableArrayList("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"));
+                    modelSelect.setValue("gpt-4o-mini");
+                } else if ("googletranslate".equalsIgnoreCase(newVal) || "google translate".equalsIgnoreCase(newVal)) {
+                    modelSelect.setItems(FXCollections.observableArrayList("default"));
+                    modelSelect.setValue("default");
+                } else {
+                    modelSelect.setItems(FXCollections.observableArrayList("gemma2:2b", "qwen2.5:3b"));
+                    modelSelect.setValue("gemma2:2b");
+                }
+            }
+        });
 
         String initialProv = aiConfig.getProvider() != null ? aiConfig.getProvider() : "ollama";
         String matchedVal = "Ollama";
@@ -79,35 +105,6 @@ public class ApiTestDialog {
         styleDropdown(provSelect);
         grid.add(provLabel, 0, 0);
         grid.add(provSelect, 1, 0);
-
-        Label modelLabel = createFormLabel("Model:");
-        ComboBox<String> modelSelect = new ComboBox<>();
-        modelSelect.setEditable(true);
-        modelSelect.setMaxWidth(Double.MAX_VALUE);
-        modelSelect.setStyle(
-                "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 4 8; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
-        modelSelect.setItems(FXCollections.observableArrayList("gemma2:2b", "gemini-1.5-flash", "gpt-4o-mini"));
-        modelSelect.setValue("gemma2:2b");
-        grid.add(modelLabel, 0, 1);
-        grid.add(modelSelect, 1, 1);
-
-        provSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
-            if (newVal != null) {
-                if ("gemini".equalsIgnoreCase(newVal)) {
-                    modelSelect.setItems(FXCollections.observableArrayList("gemini-1.5-flash", "gemini-1.5-pro"));
-                    modelSelect.setValue("gemini-1.5-flash");
-                } else if ("openapi".equalsIgnoreCase(newVal) || "openai".equalsIgnoreCase(newVal)) {
-                    modelSelect.setItems(FXCollections.observableArrayList("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"));
-                    modelSelect.setValue("gpt-4o-mini");
-                } else if ("googletranslate".equalsIgnoreCase(newVal)) {
-                    modelSelect.setItems(FXCollections.observableArrayList("default"));
-                    modelSelect.setValue("default");
-                } else {
-                    modelSelect.setItems(FXCollections.observableArrayList("gemma2:2b", "qwen2.5:3b"));
-                    modelSelect.setValue("gemma2:2b");
-                }
-            }
-        });
 
         CheckBox useCacheBox = new CheckBox("Sử dụng Cache & Glossary");
         useCacheBox.setSelected(true);
