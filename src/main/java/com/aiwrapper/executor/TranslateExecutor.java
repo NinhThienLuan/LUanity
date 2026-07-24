@@ -11,9 +11,13 @@ import org.springframework.stereotype.Component;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Component
@@ -31,6 +35,10 @@ public class TranslateExecutor implements BaseExecutor {
     private Map<String, String> cachedGlossaryMap = null;
     private long lastGlossaryMtime = -1;
     private String activePresetName = null;
+
+    private Map<String, String> cachedResolvedGlossary = null;
+    private String lastResolvedPresetSpec = "";
+    private final Map<String, Long> lastResolvedMtimes = new java.util.HashMap<>();
 
     public void setTranslationListener(TranslationListener listener) {
         this.listener = listener;
@@ -884,12 +892,81 @@ public class TranslateExecutor implements BaseExecutor {
     }
 
     public Map<String, String> resolveActiveGlossary(String activePreset) {
-        Map<String, String> globalGlossary = loadGlossaryMap();
-        Map<String, String> resolved = new LinkedHashMap<>(globalGlossary);
-        if (activePreset != null) {
-            resolved.putAll(loadPreset(activePreset));
+        File glossaryFile = new File("data/glossary.json");
+        Map<String, Long> currentMtimes = new java.util.HashMap<>();
+        currentMtimes.put("glossary.json", glossaryFile.exists() ? glossaryFile.lastModified() : -1L);
+
+        // Parse and extract distinct preset names
+        Set<String> uniquePresets = new java.util.LinkedHashSet<>();
+        if (activePreset != null && !activePreset.trim().isEmpty()) {
+            for (String s : activePreset.split(",")) {
+                String trimmed = s.trim();
+                if (!trimmed.isEmpty()) {
+                    uniquePresets.add(trimmed);
+                }
+            }
         }
-        return resolved;
+        List<String> presetList = new ArrayList<>(uniquePresets);
+        // Sort alphabetically for deterministic priority/overriding
+        Collections.sort(presetList, String.CASE_INSENSITIVE_ORDER);
+
+        // Normalize spec string to act as safe cache key
+        String normalizedSpec = String.join(",", presetList);
+
+        for (String presetName : presetList) {
+            File f = new File("data/presets/" + presetName + ".json");
+            currentMtimes.put(presetName, f.exists() ? f.lastModified() : -1L);
+        }
+
+        // Double-checked validation of cache state (using normalized spec)
+        glossaryLock.readLock().lock();
+        try {
+            if (cachedResolvedGlossary != null
+                    && Objects.equals(normalizedSpec, lastResolvedPresetSpec)
+                    && currentMtimes.equals(lastResolvedMtimes)) {
+                return cachedResolvedGlossary;
+            }
+        } finally {
+            glossaryLock.readLock().unlock();
+        }
+
+        glossaryLock.writeLock().lock();
+        try {
+            if (cachedResolvedGlossary != null
+                    && Objects.equals(normalizedSpec, lastResolvedPresetSpec)
+                    && currentMtimes.equals(lastResolvedMtimes)) {
+                return cachedResolvedGlossary;
+            }
+
+            // Rebuild the merged glossary
+            Map<String, String> globalGlossary = loadGlossaryMap();
+            Map<String, String> resolved = new LinkedHashMap<>(globalGlossary);
+
+            for (String presetName : presetList) {
+                try {
+                    resolved.putAll(loadPreset(presetName));
+                } catch (Exception ex) {
+                    System.err.println(
+                            "Warning: failed to load preset " + presetName + " during merge: " + ex.getMessage());
+                }
+            }
+
+            // Warn if total active terms exceed threshold (might affect linear contains
+            // scan latency)
+            if (resolved.size() > 500) {
+                System.out.printf(
+                        "[GLOSSARY_PERF_WARN] Total active terms: %d | Active spec: %s | Matching algorithm refactor recommended (Trie/Aho-Corasick)%n",
+                        resolved.size(), normalizedSpec);
+            }
+
+            cachedResolvedGlossary = Collections.unmodifiableMap(resolved);
+            lastResolvedPresetSpec = normalizedSpec;
+            lastResolvedMtimes.clear();
+            lastResolvedMtimes.putAll(currentMtimes);
+            return cachedResolvedGlossary;
+        } finally {
+            glossaryLock.writeLock().unlock();
+        }
     }
 
     public static class GlossaryMatchResult {
@@ -909,19 +986,13 @@ public class TranslateExecutor implements BaseExecutor {
         if (trimmed.isEmpty())
             return null;
 
-        if (activePreset != null) {
-            Map<String, String> presetMap = loadPreset(activePreset);
-            for (Map.Entry<String, String> entry : presetMap.entrySet()) {
-                if (entry.getKey().equalsIgnoreCase(trimmed)) {
-                    return new GlossaryMatchResult(entry.getValue(), "Preset");
-                }
-            }
-        }
-
-        Map<String, String> globalGlossary = loadGlossaryMap();
-        for (Map.Entry<String, String> entry : globalGlossary.entrySet()) {
+        Map<String, String> resolved = resolveActiveGlossary(activePreset);
+        for (Map.Entry<String, String> entry : resolved.entrySet()) {
             if (entry.getKey().equalsIgnoreCase(trimmed)) {
-                return new GlossaryMatchResult(entry.getValue(), "Glossary");
+                Map<String, String> global = loadGlossaryMap();
+                boolean isGlobal = global.containsKey(entry.getKey())
+                        && Objects.equals(global.get(entry.getKey()), entry.getValue());
+                return new GlossaryMatchResult(entry.getValue(), isGlobal ? "Glossary" : "Preset");
             }
         }
 

@@ -12,14 +12,18 @@ import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
+import javafx.animation.PauseTransition;
+import javafx.util.Duration;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 public class ActionsZoneCard extends VBox {
 
@@ -30,7 +34,9 @@ public class ActionsZoneCard extends VBox {
     private final Runnable onCacheChange;
 
     private ComboBox<GameHistoryManager.GameEntry> gamePathCombo;
-    private ComboBox<String> presetCombo;
+    private MenuButton presetMenuButton;
+    private PauseTransition saveDebounce = null;
+    private boolean isRestoringPresets = false;
     private Button btnToggleProxy;
     private Label lblStatusTextRef; // Expose status text ref for toolbar sync or callback
 
@@ -195,6 +201,7 @@ public class ActionsZoneCard extends VBox {
         java.util.function.Consumer<String> switchGame = (String path) -> {
             if (updatingCombo[0])
                 return;
+            flushPendingPresetSave();
             if (path == null || path.trim().isEmpty()) {
                 translateExecutor.setActiveCacheFile(null);
                 if (onCacheChange != null)
@@ -252,13 +259,8 @@ public class ActionsZoneCard extends VBox {
                         break;
                     }
                 }
-                if (restoredPreset != null && presetCombo.getItems().contains(restoredPreset)) {
-                    presetCombo.setValue(restoredPreset);
-                    translateExecutor.setActivePreset(restoredPreset);
-                } else {
-                    presetCombo.setValue("None");
-                    translateExecutor.setActivePreset(null);
-                }
+                populatePresetCheckboxes(restoredPreset);
+                translateExecutor.setActivePreset(restoredPreset);
             } catch (Exception ex) {
                 System.err.println("[ActionsZoneCard] switchGame restore preset failed: " + ex.getMessage());
             }
@@ -288,43 +290,26 @@ public class ActionsZoneCard extends VBox {
         HBox gamePathRow = new HBox(8, gamePathCombo, gamePathBrowse);
         VBox gamePathContainer = new VBox(6, gamePathLabel, gamePathRow);
 
-        // Active Theme Preset Selection
-        Label presetLabel = createFormLabel("Active Theme Preset:");
-        presetCombo = new ComboBox<>();
-        presetCombo.setEditable(false);
-        presetCombo.setStyle(
-                "-fx-background-color: #1e293b; -fx-text-fill: white; -fx-prompt-text-fill: #64748b; -fx-background-radius: 6;");
-        presetCombo.setMaxWidth(Double.MAX_VALUE);
-        HBox.setHgrow(presetCombo, Priority.ALWAYS);
+        // Active Theme Preset Selection (Multi-select Checkboxes inside MenuButton)
+        Label presetLabel = createFormLabel("Active Theme Presets:");
+        presetMenuButton = new MenuButton("None");
+        presetMenuButton.setMaxWidth(Double.MAX_VALUE);
+        presetMenuButton.getStyleClass().add("preset-menu-button");
 
-        // Initialize preset list
-        presetCombo.getItems().add("None");
-        presetCombo.getItems().addAll(translateExecutor.listPresets());
-        presetCombo.setValue("None");
-
-        presetCombo.setOnShowing(evt -> {
-            String currentSelected = presetCombo.getValue();
-            List<String> presets = translateExecutor.listPresets();
-            presetCombo.getItems().clear();
-            presetCombo.getItems().add("None");
-            presetCombo.getItems().addAll(presets);
-            if (currentSelected != null && presetCombo.getItems().contains(currentSelected)) {
-                presetCombo.setValue(currentSelected);
-            } else {
-                presetCombo.setValue("None");
+        // Initial populate of presets
+        String currentRestoredState = null;
+        if (!savedGamePath.isEmpty()) {
+            for (GameHistoryManager.GameEntry entry : histEntries) {
+                if (entry.getExePath().equalsIgnoreCase(savedGamePath)) {
+                    currentRestoredState = entry.getActivePreset();
+                    break;
+                }
             }
-        });
+        }
+        populatePresetCheckboxes(currentRestoredState);
+        translateExecutor.setActivePreset(currentRestoredState);
 
-        presetCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
-            String p = (newVal == null || newVal.equals("None")) ? null : newVal;
-            translateExecutor.setActivePreset(p);
-            String activeGamePath = getGamePath();
-            if (!activeGamePath.isEmpty()) {
-                GameHistoryManager.updateActivePreset(activeGamePath, p);
-            }
-        });
-
-        VBox presetContainer = new VBox(6, presetLabel, presetCombo);
+        VBox presetContainer = new VBox(6, presetLabel, presetMenuButton);
 
         // BepInEx Shortcut Buttons Box
         Label shortcutTitle = createFormLabel("BepInEx Utilities:");
@@ -614,6 +599,93 @@ public class ActionsZoneCard extends VBox {
 
         public SimpleStringProperty translatedProperty() {
             return translated;
+        }
+    }
+
+    private void updateMenuButtonText(List<String> checked) {
+        if (checked.isEmpty()) {
+            presetMenuButton.setText("None");
+        } else {
+            presetMenuButton.setText(String.join(", ", checked));
+        }
+    }
+
+    private void populatePresetCheckboxes(String activePresetsSpec) {
+        presetMenuButton.getItems().clear();
+        List<String> available = translateExecutor.listPresets();
+
+        // Split restored preset spec (e.g. "ban_sung,sinh_ton")
+        Set<String> activeSet = new java.util.HashSet<>();
+        if (activePresetsSpec != null && !activePresetsSpec.isEmpty()) {
+            for (String s : activePresetsSpec.split(",")) {
+                activeSet.add(s.trim());
+            }
+        }
+
+        isRestoringPresets = true;
+        try {
+            List<String> checked = new java.util.ArrayList<>();
+            for (String name : available) {
+                CheckBox cb = new CheckBox(name);
+                cb.setStyle("-fx-text-fill: #e2e8f0; -fx-padding: 4 8;");
+                if (activeSet.contains(name)) {
+                    cb.setSelected(true);
+                    checked.add(name);
+                }
+
+                cb.selectedProperty().addListener((obs, oldVal, newVal) -> {
+                    if (!isRestoringPresets) {
+                        triggerDebouncedPresetSave();
+                    }
+                });
+
+                CustomMenuItem item = new CustomMenuItem(cb);
+                item.setHideOnClick(false);
+                presetMenuButton.getItems().add(item);
+            }
+            updateMenuButtonText(checked);
+        } finally {
+            isRestoringPresets = false;
+        }
+    }
+
+    private void triggerDebouncedPresetSave() {
+        if (saveDebounce != null) {
+            saveDebounce.stop();
+        }
+        saveDebounce = new PauseTransition(Duration.millis(400));
+        saveDebounce.setOnFinished(evt -> {
+            flushPendingPresetSave();
+        });
+        saveDebounce.play();
+    }
+
+    public void flushPendingPresetSave() {
+        if (saveDebounce != null) {
+            saveDebounce.stop();
+        }
+
+        List<String> checked = new java.util.ArrayList<>();
+        for (MenuItem node : presetMenuButton.getItems()) {
+            if (node instanceof CustomMenuItem) {
+                CustomMenuItem customItem = (CustomMenuItem) node;
+                if (customItem.getContent() instanceof CheckBox) {
+                    CheckBox cb = (CheckBox) customItem.getContent();
+                    if (cb.isSelected()) {
+                        checked.add(cb.getText());
+                    }
+                }
+            }
+        }
+
+        updateMenuButtonText(checked);
+
+        String spec = checked.isEmpty() ? null : String.join(",", checked);
+        translateExecutor.setActivePreset(spec);
+        String activeGamePath = getGamePath();
+        if (!activeGamePath.isEmpty()) {
+            GameHistoryManager.updateActivePreset(activeGamePath, spec);
+            System.out.println("[ActionsZoneCard] Persisted active presets: " + spec);
         }
     }
 

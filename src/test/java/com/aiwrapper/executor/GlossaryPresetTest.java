@@ -61,6 +61,36 @@ public class GlossaryPresetTest {
         }
     }
 
+    @org.junit.jupiter.api.BeforeEach
+    public void cleanBefore() throws Exception {
+        if (originalGlossary.exists()) {
+            originalGlossary.delete();
+        }
+        File testPreset = new File("data/presets/test_theme.json");
+        if (testPreset.exists()) {
+            testPreset.delete();
+        }
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    public void cleanAfter() throws Exception {
+        if (originalGlossary.exists()) {
+            originalGlossary.delete();
+        }
+        File testPreset = new File("data/presets/test_theme.json");
+        if (testPreset.exists()) {
+            testPreset.delete();
+        }
+        File pAFile = new File("data/presets/presetA.json");
+        if (pAFile.exists()) {
+            pAFile.delete();
+        }
+        File pBFile = new File("data/presets/presetB.json");
+        if (pBFile.exists()) {
+            pBFile.delete();
+        }
+    }
+
     @Test
     public void testLoadGlossaryMapWithMtimeCaching() throws Exception {
         TranslateExecutor executor = new TranslateExecutor(null);
@@ -177,5 +207,65 @@ public class GlossaryPresetTest {
         service.shutdown();
         boolean finished = service.awaitTermination(5, TimeUnit.SECONDS);
         assertTrue(finished, "Concurrency task did not finish in time");
+    }
+
+    @Test
+    public void testMultiPresetBehavior() throws Exception {
+        TranslateExecutor executor = new TranslateExecutor(null);
+
+        // Define a base glossary map
+        Map<String, String> base = new HashMap<>();
+        base.put("key1", "glo_val1");
+        base.put("key2", "glo_val2");
+        executor.saveGlossaryMap(base);
+
+        // Create preset A
+        Map<String, String> pA = new HashMap<>();
+        pA.put("key2", "A_val2"); // overrides glossary
+        pA.put("keyA", "A_only");
+        File pAFile = new File("data/presets/presetA.json");
+        new ObjectMapper().writeValue(pAFile, pA);
+
+        // Create preset B
+        Map<String, String> pB = new HashMap<>();
+        pB.put("key2", "B_val2"); // Z-priority overrides glossary and A (since B comes alphabetically after A)
+        pB.put("keyB", "B_only");
+        File pBFile = new File("data/presets/presetB.json");
+        new ObjectMapper().writeValue(pBFile, pB);
+
+        try {
+            // Test 1: Priority merge & alphabetical order: "presetA,presetB"
+            Map<String, String> resolved = executor.resolveActiveGlossary("presetA,presetB");
+            assertEquals("glo_val1", resolved.get("key1"));
+            assertEquals("B_val2", resolved.get("key2")); // B overrides A
+            assertEquals("A_only", resolved.get("keyA"));
+            assertEquals("B_only", resolved.get("keyB"));
+
+            // "presetB,presetA" (different input order) should result in same cache key and
+            // order internally: B overrides A
+            Map<String, String> resolvedAlt = executor.resolveActiveGlossary("presetB,presetA");
+            assertSame(resolved, resolvedAlt); // Cache normalization: same Map instance returned!
+
+            // Test 2: Invalidation of composite cache on preset file modify
+            pA.put("keyA", "A_new_val");
+            new ObjectMapper().writeValue(pAFile, pA);
+            pAFile.setLastModified(System.currentTimeMillis() + 6000); // force mtime update
+
+            Map<String, String> resolvedUpdated = executor.resolveActiveGlossary("presetA,presetB");
+            assertNotSame(resolved, resolvedUpdated); // cache invalidation detected
+            assertEquals("A_new_val", resolvedUpdated.get("keyA"));
+
+            // Test 3: Missing preset safety
+            // Should load and skip nonexistent preset gracefully
+            Map<String, String> resolvedMissing = executor.resolveActiveGlossary("presetA,ghostPreset,presetB");
+            assertNotNull(resolvedMissing);
+            assertEquals("A_new_val", resolvedMissing.get("keyA"));
+            assertEquals("B_val2", resolvedMissing.get("key2"));
+        } finally {
+            if (pAFile.exists())
+                pAFile.delete();
+            if (pBFile.exists())
+                pBFile.delete();
+        }
     }
 }
