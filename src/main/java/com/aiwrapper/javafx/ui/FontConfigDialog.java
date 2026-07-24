@@ -10,7 +10,6 @@ import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Collections;
@@ -332,58 +331,19 @@ public class FontConfigDialog {
         downloadBtn.setText("Đang tải...");
 
         Thread thread = new Thread(() -> {
-            String zipUrl = "https://github.com/bbepis/XUnity.AutoTranslator/releases/download/v5.3.0/TMP_Font_AssetBundles.zip";
             try {
-                java.net.URL url = new java.net.URL(zipUrl);
-                java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-                conn.setConnectTimeout(15000);
-                conn.setReadTimeout(120000);
-
-                if (conn.getResponseCode() == 200) {
-                    int count = 0;
-                    byte[] buffer = new byte[4096];
-                    try (java.util.zip.ZipInputStream zis = new java.util.zip.ZipInputStream(conn.getInputStream())) {
-                        java.util.zip.ZipEntry entry;
-                        while ((entry = zis.getNextEntry()) != null) {
-                            String name = entry.getName();
-
-                            File destFile = new File(gameDir, name);
-                            String canonicalDest = destFile.getCanonicalPath();
-                            String canonicalGameDir = gameDir.getCanonicalPath();
-                            if (!canonicalDest.startsWith(canonicalGameDir + File.separator)
-                                    && !canonicalDest.equals(canonicalGameDir)) {
-                                throw new SecurityException("Zip Slip detected! Entry: " + name);
-                            }
-
-                            if (name.equals("arialuni_sdf_u2018") || name.equals("arialuni_sdf_u2019")) {
-                                try (FileOutputStream fos = new FileOutputStream(destFile)) {
-                                    int read;
-                                    while ((read = zis.read(buffer)) != -1) {
-                                        fos.write(buffer, 0, read);
-                                    }
-                                }
-                                count++;
-                            }
-                            zis.closeEntry();
-                        }
-                    }
-
-                    final int extractedCount = count;
+                com.aiwrapper.service.AssetDownloadService downloadService = new com.aiwrapper.service.AssetDownloadService();
+                downloadService.downloadFontAssets(gameDir, message -> {
                     Platform.runLater(() -> {
                         downloadBtn.setDisable(false);
                         downloadBtn.setText("Tải thêm từ mạng");
-                        Alert alert = new Alert(Alert.AlertType.INFORMATION,
-                                "Đã tải thành công " + extractedCount + " font (arialuni_sdf) vào thư mục game!");
+                        Alert alert = new Alert(Alert.AlertType.INFORMATION, message);
                         if (cssFile.exists()) {
                             alert.getDialogPane().getStylesheets().add(cssFile.toURI().toString());
                         }
                         alert.showAndWait();
                     });
-                } else {
-                    throw new Exception("HTTP error code: " + conn.getResponseCode());
-                }
+                });
             } catch (Exception ex) {
                 ex.printStackTrace();
                 Platform.runLater(() -> {

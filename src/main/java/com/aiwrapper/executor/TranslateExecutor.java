@@ -139,6 +139,8 @@ public class TranslateExecutor implements BaseExecutor {
             return java.util.concurrent.CompletableFuture.completedFuture(text);
         }
 
+        syncFromDisk();
+
         ObjectMapper mapper = new ObjectMapper();
         Map<String, String> cacheMap = new java.util.HashMap<>();
         File activeCache = activeCacheFile;
@@ -551,6 +553,8 @@ public class TranslateExecutor implements BaseExecutor {
             return text;
         }
 
+        syncFromDisk();
+
         // Load Hybrid Cache (global cache fallback + game-specific override)
         ObjectMapper mapper = new ObjectMapper();
         Map<String, String> cacheMap = new java.util.HashMap<>();
@@ -741,22 +745,72 @@ public class TranslateExecutor implements BaseExecutor {
                 "(?i)^[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*((kg|g|l|s|m|h|M|xp|exp|lv|lvl|v|hz|fps|ping|ms|am|pm|sec|min|hr|d|km|km/h|lbs|mph|ml|oz|px|pt|in|ft|yd)\\b[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*)*$");
     }
 
-    private String getGameName() {
-        File pathFile = new File("data/game_path.txt");
-        if (pathFile.exists()) {
-            try {
-                String gamePath = new String(java.nio.file.Files.readAllBytes(pathFile.toPath()),
-                        java.nio.charset.StandardCharsets.UTF_8).trim();
-                if (!gamePath.isEmpty()) {
-                    File exeFile = new File(gamePath);
-                    String gameName = exeFile.getName();
-                    if (gameName.endsWith(".exe")) {
-                        gameName = gameName.substring(0, gameName.length() - 4);
+    private void syncFromDisk() {
+        try {
+            com.aiwrapper.config.AppConfig config = com.aiwrapper.config.AppConfigManager.load();
+            if (config != null) {
+                // Sync API Keys from app_config.json
+                String geminiKey = config.getGeminiApiKey();
+                if (geminiKey != null && !geminiKey.trim().isEmpty()) {
+                    if (aiFactory.getConstraints() instanceof com.aiwrapper.config.AiEntity.Gemini) {
+                        ((com.aiwrapper.config.AiEntity.Gemini) aiFactory.getConstraints()).setApiKey(geminiKey.trim());
                     }
-                    return gameName;
                 }
-            } catch (Exception e) {
-                // Ignore
+                String openaiKey = config.getOpenaiApiKey();
+                if (openaiKey != null && !openaiKey.trim().isEmpty()) {
+                    if (aiFactory.getConstraints() instanceof com.aiwrapper.config.AiEntity.OpenAPI) {
+                        ((com.aiwrapper.config.AiEntity.OpenAPI) aiFactory.getConstraints())
+                                .setApiKey(openaiKey.trim());
+                    }
+                }
+
+                // Sync active cache file, language pair, presets from game history
+                String gameName = getGameName();
+                if (gameName != null && !gameName.isEmpty()) {
+                    this.activeCacheFile = new File("data/cache_" + gameName + ".json");
+
+                    // Read game_history.json for presets and language pair
+                    File historyFile = new File("data/game_history.json");
+                    if (historyFile.exists()) {
+                        ObjectMapper mapper = new ObjectMapper();
+                        List<Map<String, Object>> games = mapper.readValue(historyFile,
+                                new TypeReference<List<Map<String, Object>>>() {
+                                });
+                        for (Map<String, Object> game : games) {
+                            String name = String.valueOf(game.get("name"));
+                            if (gameName.equalsIgnoreCase(name)) {
+                                Object lpObj = game.get("languagePair");
+                                if (lpObj != null) {
+                                    setLanguagePair(String.valueOf(lpObj));
+                                }
+                                Object prObj = game.get("activePreset");
+                                if (prObj != null) {
+                                    setActivePreset(String.valueOf(prObj));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    this.activeCacheFile = new File("data/cache_default.json");
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Warning: Config/Cache sync from disk failed: " + e.getMessage());
+        }
+    }
+
+    private String getGameName() {
+        com.aiwrapper.config.AppConfig config = com.aiwrapper.config.AppConfigManager.load();
+        if (config != null) {
+            String gamePath = config.getActiveGamePath();
+            if (gamePath != null && !gamePath.trim().isEmpty()) {
+                File exeFile = new File(gamePath.trim());
+                String gameName = exeFile.getName();
+                if (gameName.endsWith(".exe")) {
+                    gameName = gameName.substring(0, gameName.length() - 4);
+                }
+                return gameName;
             }
         }
         return null;
@@ -867,15 +921,9 @@ public class TranslateExecutor implements BaseExecutor {
     public void updateCacheValue(String original, String translated) {
         if (original == null || translated == null)
             return;
+        syncFromDisk();
         ObjectMapper mapper = new ObjectMapper();
         File targetCacheFile = activeCacheFile;
-        if (targetCacheFile == null) {
-            File globalCacheFile = new File("data/cache.json");
-            String gameName = getGameName();
-            targetCacheFile = (gameName != null && !gameName.isEmpty())
-                    ? new File("data/cache_" + gameName + ".json")
-                    : globalCacheFile;
-        }
         try {
             Map<String, String> cacheMap = new java.util.HashMap<>();
             if (targetCacheFile.exists()) {
@@ -1134,14 +1182,9 @@ public class TranslateExecutor implements BaseExecutor {
     public void deleteCacheValue(String original) {
         if (original == null)
             return;
+        syncFromDisk();
         ObjectMapper mapper = new ObjectMapper();
         File targetCacheFile = activeCacheFile;
-        if (targetCacheFile == null) {
-            String gameName = getGameName();
-            targetCacheFile = (gameName != null && !gameName.isEmpty())
-                    ? new File("data/cache_" + gameName + ".json")
-                    : new File("data/cache_default.json");
-        }
         if (!targetCacheFile.exists()) {
             return;
         }
@@ -1160,14 +1203,9 @@ public class TranslateExecutor implements BaseExecutor {
     public void importTranslations(Map<String, String> newTranslations) {
         if (newTranslations == null || newTranslations.isEmpty())
             return;
+        syncFromDisk();
         ObjectMapper mapper = new ObjectMapper();
         File targetCacheFile = activeCacheFile;
-        if (targetCacheFile == null) {
-            String gameName = getGameName();
-            targetCacheFile = (gameName != null && !gameName.isEmpty())
-                    ? new File("data/cache_" + gameName + ".json")
-                    : new File("data/cache_default.json");
-        }
         try {
             Map<String, String> cacheMap = new java.util.HashMap<>();
             if (targetCacheFile.exists() && targetCacheFile.length() > 0) {
