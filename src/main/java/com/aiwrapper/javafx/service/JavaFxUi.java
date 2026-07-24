@@ -77,6 +77,7 @@ public class JavaFxUi {
         leftPane.getChildren().addAll(configZoneCard, actionsZoneCard);
 
         // Connect cross-card custom properties & triggers
+        actionsZoneCard.setOnGameChanged(configZoneCard::selectLanguagePair);
         actionsZoneCard.setOnProxyStatusChanged(() -> topStatusBar.updateStatus(translateExecutor.isProxyActive()));
         translationCacheCard.setGamePathSupplier(actionsZoneCard::getGamePath);
         translationCacheCard.setOnRowChanged(actionsZoneCard::autoExportToGame);

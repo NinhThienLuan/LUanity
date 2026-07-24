@@ -1,5 +1,6 @@
 package com.aiwrapper.executor;
 
+import com.aiwrapper.template.PromptTemplate;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -161,5 +162,22 @@ public class TagPreservationTest {
         // Test prefixes integration
         assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "**Vietnamese: \"Tôi sẽ kể\"**"));
         assertEquals("Tôi sẽ kể", executor.cleanRawTranslation("Original", "bản dịch: Tôi sẽ kể"));
+    }
+
+    @Test
+    public void testLanguagePairPromptRendering() {
+        TranslateExecutor executor = new TranslateExecutor(null);
+        executor.setLanguagePair("ZH/VI");
+        assertEquals("zh", executor.getFromLang());
+        assertEquals("vi", executor.getToLang());
+
+        // Render template with placeholders
+        String template = "Translate {from} to {to}: {text}";
+        PromptTemplate pt = new PromptTemplate(template);
+        String rendered = pt.render(java.util.Map.of(
+                "from", "Chinese",
+                "to", "Vietnamese",
+                "text", "你好"));
+        assertEquals("Translate Chinese to Vietnamese: 你好", rendered);
     }
 }

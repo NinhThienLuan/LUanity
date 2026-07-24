@@ -1,12 +1,12 @@
 package com.aiwrapper.javafx.ui;
 
+import com.aiwrapper.config.AppConfig;
+import com.aiwrapper.config.AppConfigManager;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -20,7 +20,6 @@ import java.util.List;
 public class GameHistoryManager {
 
     private static final File HISTORY_FILE = new File("data/game_history.json");
-    private static final File ACTIVE_PATH_FILE = new File("data/game_path.txt");
     private static final int MAX_ENTRIES = 10;
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .enable(SerializationFeature.INDENT_OUTPUT);
@@ -45,7 +44,7 @@ public class GameHistoryManager {
 
     /**
      * Upsert the given exe path into the history list and save.
-     * Also persists the path to game_path.txt as the active game.
+     * Also persists the path to AppConfigManager as the active game.
      */
     public static void upsert(String exePath) {
         if (exePath == null || exePath.trim().isEmpty())
@@ -54,11 +53,13 @@ public class GameHistoryManager {
 
         List<GameEntry> list = load();
 
-        // Preserve existing activePreset if present
+        // Preserve existing activePreset and languagePair if present
         String existingPreset = null;
+        String existingLangPair = "EN/VI";
         for (GameEntry e : list) {
             if (e.getExePath().equalsIgnoreCase(path)) {
                 existingPreset = e.getActivePreset();
+                existingLangPair = e.getLanguagePair();
                 break;
             }
         }
@@ -74,6 +75,7 @@ public class GameHistoryManager {
         }
         GameEntry entry = new GameEntry(rawName, path, LocalDateTime.now().format(FMT));
         entry.setActivePreset(existingPreset);
+        entry.setLanguagePair(existingLangPair);
 
         // Prepend (most recent first)
         list.add(0, entry);
@@ -106,6 +108,25 @@ public class GameHistoryManager {
         }
     }
 
+    /** Update language pair for a game path directly in history. */
+    public static void updateLanguagePair(String exePath, String languagePair) {
+        if (exePath == null || exePath.trim().isEmpty())
+            return;
+        String path = exePath.trim();
+        List<GameEntry> list = load();
+        boolean updated = false;
+        for (GameEntry entry : list) {
+            if (entry.getExePath().equalsIgnoreCase(path)) {
+                entry.setLanguagePair(languagePair);
+                updated = true;
+                break;
+            }
+        }
+        if (updated) {
+            save(list);
+        }
+    }
+
     /** Persist a path as the active game without altering history order. */
     public static void setActive(String exePath) {
         if (exePath == null || exePath.trim().isEmpty())
@@ -115,10 +136,8 @@ public class GameHistoryManager {
 
     /** Return the currently active game path, or empty string. */
     public static String loadActivePath() {
-        if (!ACTIVE_PATH_FILE.exists())
-            return "";
         try {
-            return new String(Files.readAllBytes(ACTIVE_PATH_FILE.toPath()), StandardCharsets.UTF_8).trim();
+            return AppConfigManager.load().getActiveGamePath();
         } catch (Exception e) {
             return "";
         }
@@ -141,10 +160,9 @@ public class GameHistoryManager {
 
     private static void writeActivePath(String path) {
         try {
-            File parent = ACTIVE_PATH_FILE.getParentFile();
-            if (parent != null && !parent.exists())
-                parent.mkdirs();
-            Files.write(ACTIVE_PATH_FILE.toPath(), path.getBytes(StandardCharsets.UTF_8));
+            AppConfig config = AppConfigManager.load();
+            config.setActiveGamePath(path);
+            AppConfigManager.save(config);
         } catch (Exception e) {
             System.err.println("[GameHistoryManager] Failed to write active path: " + e.getMessage());
         }
@@ -159,6 +177,7 @@ public class GameHistoryManager {
         private String exePath;
         private String lastUsed;
         private String activePreset;
+        private String languagePair = "EN/VI";
 
         /** Jackson default constructor */
         public GameEntry() {
@@ -186,6 +205,10 @@ public class GameHistoryManager {
             return activePreset;
         }
 
+        public String getLanguagePair() {
+            return languagePair;
+        }
+
         public void setName(String name) {
             this.name = name;
         }
@@ -200,6 +223,10 @@ public class GameHistoryManager {
 
         public void setActivePreset(String activePreset) {
             this.activePreset = activePreset;
+        }
+
+        public void setLanguagePair(String languagePair) {
+            this.languagePair = languagePair;
         }
 
         @Override

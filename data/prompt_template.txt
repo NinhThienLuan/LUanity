@@ -1,15 +1,15 @@
-Translate the following English game text into Vietnamese according to these rules:
+Translate the following {from} game text into Vietnamese according to these rules:
 1. For single words and phrases: translate literally and precisely (dịch sát nghĩa). 
 2. For full sentences: translate naturally to suit the game context (dịch phù hợp với ngữ cảnh).
-3. Do not explain, do not write anything else, only return the Vietnamese translation.
+3. Do not explain, do not write anything else, only return the {to} translation.
 4. Preserve placeholders like [[TAG_N]] exactly.
 5. Absolutely do not output any conversational filler or unrelated details.
 
-English: Continue
-Vietnamese: Tiếp tục
+{from}: Continue
+{to}: Tiếp tục
 
-English: Settings
-Vietnamese: Cài đặt
+{from}: Settings
+{to}: Cài đặt
 
-English: {text}
-Vietnamese:
+{from}: {text}
+{to}:

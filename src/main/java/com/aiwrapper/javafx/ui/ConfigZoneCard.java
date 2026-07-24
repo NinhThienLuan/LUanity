@@ -1,6 +1,8 @@
 package com.aiwrapper.javafx.ui;
 
 import com.aiwrapper.config.AiConfig;
+import com.aiwrapper.config.AppConfig;
+import com.aiwrapper.config.AppConfigManager;
 import com.aiwrapper.executor.TranslateExecutor;
 import com.aiwrapper.provider.AiProviderFactory;
 import javafx.application.Platform;
@@ -37,6 +39,7 @@ public class ConfigZoneCard extends VBox {
     private ComboBox<String> modelSelect;
     private Label apiKeyLabel;
     private Circle providerStatusDot;
+    private ComboBox<String> langSelect;
 
     private String savedApiKey = "";
     private String savedOpenApiKey = "";
@@ -58,26 +61,12 @@ public class ConfigZoneCard extends VBox {
     }
 
     private void loadSavedApiKeys() {
-        File apiKeyFile = new File("data/gemini_key.txt");
-        if (apiKeyFile.exists()) {
-            try {
-                savedApiKey = new String(Files.readAllBytes(apiKeyFile.toPath()), StandardCharsets.UTF_8).trim();
-                aiConfig.getGemini().setApiKey(savedApiKey);
-            } catch (Exception ex) {
-                // Ignore
-            }
-        }
+        AppConfig appCfg = AppConfigManager.load();
+        savedApiKey = appCfg.getGeminiApiKey();
+        aiConfig.getGemini().setApiKey(savedApiKey);
 
-        File openApiKeyFile = new File("data/openapi_key.txt");
-        if (openApiKeyFile.exists()) {
-            try {
-                savedOpenApiKey = new String(Files.readAllBytes(openApiKeyFile.toPath()), StandardCharsets.UTF_8)
-                        .trim();
-                aiConfig.getOpenapi().setApiKey(savedOpenApiKey);
-            } catch (Exception ex) {
-                // Ignore
-            }
-        }
+        savedOpenApiKey = appCfg.getOpenaiApiKey();
+        aiConfig.getOpenapi().setApiKey(savedOpenApiKey);
     }
 
     private void initLayout() {
@@ -207,13 +196,15 @@ public class ConfigZoneCard extends VBox {
         apiKeyField.textProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 String prov = providerSelect.getValue();
+                AppConfig appCfg = AppConfigManager.load();
                 if ("gemini".equalsIgnoreCase(prov)) {
                     aiConfig.getGemini().setApiKey(newVal.trim());
-                    saveKeyToFile("data/gemini_key.txt", newVal.trim());
+                    appCfg.setGeminiApiKey(newVal.trim());
                 } else if ("openapi".equalsIgnoreCase(prov) || "openai".equalsIgnoreCase(prov)) {
                     aiConfig.getOpenapi().setApiKey(newVal.trim());
-                    saveKeyToFile("data/openapi_key.txt", newVal.trim());
+                    appCfg.setOpenaiApiKey(newVal.trim());
                 }
+                AppConfigManager.save(appCfg);
                 checkOllamaHealth.run();
             }
         });
@@ -328,19 +319,112 @@ public class ConfigZoneCard extends VBox {
         grid.add(tempLabel, 0, 3);
         grid.add(tempBox, 1, 3);
 
+        // 4. Language Pair
+        Label langLabel = createFormLabel("Language Pair:");
+        langSelect = new ComboBox<>(FXCollections.observableArrayList("EN/VI", "ZH/VI", "JA/VI", "KO/VI"));
+        langSelect.setValue("EN/VI");
+        styleDropdown(langSelect);
+        langSelect.setMaxWidth(Double.MAX_VALUE);
+
+        // Load saved state (from current app_config.json)
+        AppConfig appConfig = AppConfigManager.load();
+        String savedPair = appConfig.getLanguagePair();
+        if (savedPair != null && !savedPair.trim().isEmpty()) {
+            langSelect.setValue(savedPair);
+            translateExecutor.setLanguagePair(savedPair);
+        } else {
+            appConfig.setLanguagePair("EN/VI");
+            AppConfigManager.save(appConfig);
+            translateExecutor.setLanguagePair("EN/VI");
+        }
+
+        langSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
+            if (newVal != null) {
+                AppConfig appCfg = AppConfigManager.load();
+                appCfg.setLanguagePair(newVal);
+                AppConfigManager.save(appCfg);
+
+                translateExecutor.setLanguagePair(newVal);
+
+                String activePath = GameHistoryManager.loadActivePath();
+                if (activePath != null && !activePath.isEmpty()) {
+                    GameHistoryManager.updateLanguagePair(activePath, newVal);
+                    updateAutoTranslatorLanguages(new File(activePath).getParentFile(), translateExecutor.getFromLang(),
+                            translateExecutor.getToLang());
+                }
+            }
+        });
+
+        grid.add(langLabel, 0, 4);
+        grid.add(langSelect, 1, 4);
+
         getChildren().addAll(zoneATitle, grid);
     }
 
-    private void saveKeyToFile(String pathStr, String val) {
+    public void selectLanguagePair(String languagePair) {
+        if (languagePair != null && !languagePair.isEmpty() && langSelect != null) {
+            langSelect.setValue(languagePair);
+            translateExecutor.setLanguagePair(languagePair);
+        }
+    }
+
+    private void updateAutoTranslatorLanguages(File gameRoot, String fromLang, String targetLang) {
+        File configDir = new File(gameRoot, "BepInEx/config");
+        File configFile = new File(configDir, "AutoTranslatorConfig.ini");
+        if (!configFile.exists()) {
+            return;
+        }
         try {
-            File file = new File(pathStr);
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
+            List<String> lines = Files.readAllLines(configFile.toPath(), StandardCharsets.UTF_8);
+            List<String> output = new java.util.ArrayList<>();
+            boolean generalBlock = false;
+            boolean hasLanguage = false;
+            boolean hasFromLanguage = false;
+
+            for (String line : lines) {
+                String trimmed = line.trim();
+                if (trimmed.equals("[General]")) {
+                    generalBlock = true;
+                    output.add(line);
+                    continue;
+                } else if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                    generalBlock = false;
+                }
+
+                if (generalBlock) {
+                    if (trimmed.startsWith("Language=")) {
+                        output.add("Language=" + targetLang);
+                        hasLanguage = true;
+                    } else if (trimmed.startsWith("FromLanguage=")) {
+                        output.add("FromLanguage=" + fromLang);
+                        hasFromLanguage = true;
+                    } else {
+                        output.add(line);
+                    }
+                } else {
+                    output.add(line);
+                }
             }
-            Files.write(file.toPath(), val.getBytes(StandardCharsets.UTF_8));
+
+            if (!hasLanguage || !hasFromLanguage) {
+                for (int i = 0; i < output.size(); i++) {
+                    if (output.get(i).trim().equals("[General]")) {
+                        if (!hasLanguage) {
+                            output.add(i + 1, "Language=" + targetLang);
+                        }
+                        if (!hasFromLanguage) {
+                            output.add(i + 1, "FromLanguage=" + fromLang);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            Files.write(configFile.toPath(), output, StandardCharsets.UTF_8);
+            System.out.println("[ConfigZoneCard] Updated AutoTranslatorConfig.ini language pair: " + fromLang + " -> "
+                    + targetLang);
         } catch (Exception ex) {
-            // Ignore
+            System.err.println("[ConfigZoneCard] Failed to update AutoTranslatorConfig.ini: " + ex.getMessage());
         }
     }
 

@@ -1,31 +1,37 @@
 [ {
+  "name" : "Garisani",
+  "exePath" : "D:\\SteamLibrary\\steamapps\\common\\가리사니 흥신소\\Garisani.exe",
+  "lastUsed" : "2026-07-24T13:43:42.7707625",
+  "activePreset" : null,
+  "languagePair" : "EN/VI"
+}, {
   "name" : "Super Auto Pets",
   "exePath" : "D:\\SteamLibrary\\steamapps\\common\\Super Auto Pets\\Super Auto Pets.exe",
   "lastUsed" : "2026-07-24T10:54:29.834883",
-  "activePreset" : null
-}, {
-  "name" : "Garisani",
-  "exePath" : "D:\\SteamLibrary\\steamapps\\common\\가리사니 흥신소\\Garisani.exe",
-  "lastUsed" : "2026-07-24T10:42:48.773874",
-  "activePreset" : null
+  "activePreset" : null,
+  "languagePair" : "EN/VI"
 }, {
   "name" : "Scritchy Scratchy",
   "exePath" : "D:\\SteamLibrary\\steamapps\\common\\Scritchy Scratchy Demo\\Scritchy Scratchy.exe",
   "lastUsed" : "2026-07-23T21:35:22.7305473",
-  "activePreset" : null
+  "activePreset" : null,
+  "languagePair" : "EN/VI"
 }, {
   "name" : "Underchoice",
   "exePath" : "D:\\G\\Underchoice_LinkNeverDie.Com\\Underchoice.exe",
   "lastUsed" : "2026-07-23T21:22:04.3699435",
-  "activePreset" : "ban_sung"
+  "activePreset" : "ban_sung",
+  "languagePair" : "EN/VI"
 }, {
   "name" : "Duckov",
   "exePath" : "D:\\G\\EFD.v2.3.30_LinkNeverDie.Com\\Duckov.exe",
   "lastUsed" : "2026-07-23T21:16:19.0168777",
-  "activePreset" : "sinh_ton"
+  "activePreset" : "sinh_ton",
+  "languagePair" : "EN/VI"
 }, {
   "name" : "The Life and Suffering of Sir Brante",
   "exePath" : "D:\\SteamLibrary\\steamapps\\common\\The Life and Suffering of Sir Brante\\The Life and Suffering of Sir Brante.exe",
   "lastUsed" : "2026-07-23T21:16:17.6597384",
-  "activePreset" : "sinh_ton"
+  "activePreset" : "sinh_ton",
+  "languagePair" : "EN/VI"
 } ]

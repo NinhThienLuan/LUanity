@@ -56,19 +56,74 @@ public class TranslateExecutor implements BaseExecutor {
 
     @org.springframework.beans.factory.annotation.Autowired
     private TranslationBatchQueue batchQueue;
-    private String promptTemplateString = "Translate the following English game text into Vietnamese according to these rules:\n"
+    private String fromLang = "en";
+    private String toLang = "vi";
+
+    private String promptTemplateString = "Translate the following {from} game text into {to} according to these rules:\n"
             +
             "1. For single words and phrases: translate literally and precisely (dịch sát nghĩa).\n" +
             "2. For full sentences: translate naturally to suit the game context (dịch phù hợp với ngữ cảnh).\n" +
-            "3. Do not explain, do not write anything else, only return the Vietnamese translation.\n" +
+            "3. Do not explain, do not write anything else, only return the {to} translation.\n" +
             "4. Preserve placeholders like [[TAG_N]] exactly.\n" +
             "5. Absolutely do not output any conversational filler or unrelated details.\n\n" +
-            "English: \"Continue\"\n" +
-            "Vietnamese: \"Tiếp tục\"\n\n" +
-            "English: \"Settings\"\n" +
-            "Vietnamese: \"Cài đặt\"\n\n" +
-            "English: \"{text}\"\n" +
-            "Vietnamese: \"";
+            "{from}: \"Continue\"\n" +
+            "{to}: \"Tiếp tục\"\n\n" +
+            "{from}: \"Settings\"\n" +
+            "{to}: \"Cài đặt\"\n\n" +
+            "{from}: \"{text}\"\n" +
+            "{to}: \"";
+
+    public String getFromLang() {
+        return fromLang;
+    }
+
+    public void setFromLang(String fromLang) {
+        this.fromLang = fromLang;
+    }
+
+    public String getToLang() {
+        return toLang;
+    }
+
+    public void setToLang(String toLang) {
+        this.toLang = toLang;
+    }
+
+    public void setLanguagePair(String languagePair) {
+        if (languagePair == null || !languagePair.contains("/")) {
+            return;
+        }
+        String[] parts = languagePair.split("/");
+        if (parts.length == 2) {
+            this.fromLang = parts[0].trim().toLowerCase();
+            this.toLang = parts[1].trim().toLowerCase();
+        }
+    }
+
+    private String getLanguageDisplayName(String langCode) {
+        if (langCode == null)
+            return "English";
+        String normalized = langCode.trim().toLowerCase();
+        if ("zh".equals(normalized))
+            return "Chinese";
+        if ("en".equals(normalized))
+            return "English";
+        if ("ja".equals(normalized))
+            return "Japanese";
+        if ("ko".equals(normalized))
+            return "Korean";
+        if ("vi".equals(normalized))
+            return "Vietnamese";
+        try {
+            java.util.Locale locale = new java.util.Locale(normalized);
+            String disp = locale.getDisplayLanguage(java.util.Locale.ENGLISH);
+            if (disp != null && !disp.isEmpty()) {
+                return disp;
+            }
+        } catch (Exception ignored) {
+        }
+        return langCode.toUpperCase();
+    }
 
     public TranslateExecutor(AiProviderFactory aiFactory) {
         this.aiFactory = aiFactory;
@@ -202,11 +257,26 @@ public class TranslateExecutor implements BaseExecutor {
         java.io.File file = new java.io.File("data/prompt_template.txt");
         if (file.exists()) {
             try {
-                this.promptTemplateString = new String(java.nio.file.Files.readAllBytes(file.toPath()),
+                String content = new String(java.nio.file.Files.readAllBytes(file.toPath()),
                         java.nio.charset.StandardCharsets.UTF_8);
+                // Migrate legacy prompt template if it doesn't contain placeholders
+                if (content.contains("Translate the following English game text into Vietnamese")
+                        && !content.contains("{from}")) {
+                    content = content
+                            .replace("English game text", "{from} game text")
+                            .replace("Translate the following English game text into Vietnamese",
+                                    "Translate the following {from} game text into {to}")
+                            .replace("Vietnamese translation", "{to} translation")
+                            .replace("English:", "{from}:")
+                            .replace("Vietnamese:", "{to}:");
+                    java.nio.file.Files.write(file.toPath(), content.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                }
+                this.promptTemplateString = content;
             } catch (Exception e) {
                 // Ignore
             }
+        } else {
+            setPromptTemplate(promptTemplateString);
         }
     }
 
@@ -386,14 +456,20 @@ public class TranslateExecutor implements BaseExecutor {
                     promptText = glossaryPrompt.toString();
                 }
 
-                String prompt = activeTemplate.render(Map.of("text", promptText));
+                String fromName = getLanguageDisplayName(fromLang);
+                String toName = getLanguageDisplayName(toLang);
+                String prompt = activeTemplate.render(Map.of(
+                        "text", promptText,
+                        "from", fromName,
+                        "to", toName));
 
                 try {
                     String rawTranslation = ai.complete(prompt, options);
                     String cleanedRaw = cleanRawTranslation(text, rawTranslation);
 
                     if (isRefusalOrJunk(cleanedRaw)) {
-                        String simplePrompt = "Translate this English text to Vietnamese (only return the translation, no explanation): "
+                        String simplePrompt = "Translate this " + fromName + " text to " + toName
+                                + " (only return the translation, no explanation): "
                                 + text;
                         try {
                             String retryRaw = ai.complete(simplePrompt, options);
@@ -568,7 +644,12 @@ public class TranslateExecutor implements BaseExecutor {
             }
         }
 
-        String prompt = activeTemplate.render(Map.of("text", promptText));
+        String fromName = getLanguageDisplayName(fromLang);
+        String toName = getLanguageDisplayName(toLang);
+        String prompt = activeTemplate.render(Map.of(
+                "text", promptText,
+                "from", fromName,
+                "to", toName));
         AiProvider ai = aiFactory.get();
 
         String translated;
@@ -577,7 +658,8 @@ public class TranslateExecutor implements BaseExecutor {
             String cleanedRaw = cleanRawTranslation(text, rawTranslation);
 
             if (isRefusalOrJunk(cleanedRaw)) {
-                String simplePrompt = "Translate this English text to Vietnamese (only return the translation, no explanation): "
+                String simplePrompt = "Translate this " + fromName + " text to " + toName
+                        + " (only return the translation, no explanation): "
                         + text;
                 try {
                     String retryRaw = ai.complete(simplePrompt, options != null ? options : Map.of());

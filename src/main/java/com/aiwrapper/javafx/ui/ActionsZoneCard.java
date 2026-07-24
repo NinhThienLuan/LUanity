@@ -62,6 +62,7 @@ public class ActionsZoneCard extends VBox {
     // Callback to synchronize the state changes from outside
     private Runnable onProxyStatusChanged;
     private java.util.function.Consumer<String> onConsoleLog;
+    private java.util.function.Consumer<String> onGameChanged;
 
     public void setOnProxyStatusChanged(Runnable callback) {
         this.onProxyStatusChanged = callback;
@@ -69,6 +70,10 @@ public class ActionsZoneCard extends VBox {
 
     public void setOnConsoleLog(java.util.function.Consumer<String> callback) {
         this.onConsoleLog = callback;
+    }
+
+    public void setOnGameChanged(java.util.function.Consumer<String> callback) {
+        this.onGameChanged = callback;
     }
 
     private void initLayout() {
@@ -252,15 +257,21 @@ public class ActionsZoneCard extends VBox {
             // Restore active preset from game history
             try {
                 String restoredPreset = null;
+                String restoredLangPair = "EN/VI";
                 List<GameHistoryManager.GameEntry> updated = GameHistoryManager.load();
                 for (GameHistoryManager.GameEntry entry : updated) {
                     if (entry.getExePath().equalsIgnoreCase(trimmed)) {
                         restoredPreset = entry.getActivePreset();
+                        restoredLangPair = entry.getLanguagePair();
                         break;
                     }
                 }
                 populatePresetCheckboxes(restoredPreset);
                 translateExecutor.setActivePreset(restoredPreset);
+                translateExecutor.setLanguagePair(restoredLangPair);
+                if (onGameChanged != null) {
+                    onGameChanged.accept(restoredLangPair);
+                }
             } catch (Exception ex) {
                 System.err.println("[ActionsZoneCard] switchGame restore preset failed: " + ex.getMessage());
             }
@@ -527,10 +538,11 @@ public class ActionsZoneCard extends VBox {
 
             Thread setupThread = new Thread(() -> {
                 try {
-                    svc.setup(gameExe, 8080, "vi", msg -> javafx.application.Platform.runLater(() -> {
-                        if (onConsoleLog != null)
-                            onConsoleLog.accept(msg);
-                    }));
+                    svc.setup(gameExe, 8080, translateExecutor.getToLang(),
+                            msg -> javafx.application.Platform.runLater(() -> {
+                                if (onConsoleLog != null)
+                                    onConsoleLog.accept(msg);
+                            }));
                     javafx.application.Platform.runLater(() -> {
                         btnSetup.setDisable(false);
                         btnSetup.setText("⬇ Cài BepInEx + AutoTranslator");
