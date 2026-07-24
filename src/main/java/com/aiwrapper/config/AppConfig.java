@@ -5,6 +5,7 @@ public class AppConfig {
     private String geminiApiKey = "";
     private String openaiApiKey = "";
     private String languagePair = "EN/VI";
+    private String provider = "ollama";
 
     public String getActiveGamePath() {
         return activeGamePath;
@@ -36,5 +37,13 @@ public class AppConfig {
 
     public void setLanguagePair(String languagePair) {
         this.languagePair = languagePair;
+    }
+
+    public String getProvider() {
+        return provider;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
     }
 }

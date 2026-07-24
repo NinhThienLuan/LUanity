@@ -32,6 +32,7 @@ public class AiProviderFactory {
                 return geminiProvider;
             case "googletranslate":
             case "google":
+            case "google translate":
                 return googleTranslateProvider;
             case "openapi":
             case "openai":
@@ -51,6 +52,7 @@ public class AiProviderFactory {
                 return aiConfig.getGemini();
             case "googletranslate":
             case "google":
+            case "google translate":
                 return aiConfig.getGoogletranslate();
             case "openapi":
             case "openai":

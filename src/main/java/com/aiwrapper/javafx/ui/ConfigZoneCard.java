@@ -65,6 +65,10 @@ public class ConfigZoneCard extends VBox {
 
         savedOpenApiKey = appCfg.getOpenaiApiKey();
         aiConfig.getOpenapi().setApiKey(savedOpenApiKey);
+
+        if (appCfg.getProvider() != null && !appCfg.getProvider().isEmpty()) {
+            aiConfig.setProvider(appCfg.getProvider());
+        }
     }
 
     private void initLayout() {
@@ -147,7 +151,8 @@ public class ConfigZoneCard extends VBox {
         String matchedVal = "Ollama";
         if ("gemini".equalsIgnoreCase(initialProv)) {
             matchedVal = "Gemini";
-        } else if ("googletranslate".equalsIgnoreCase(initialProv) || "google".equalsIgnoreCase(initialProv)) {
+        } else if ("googletranslate".equalsIgnoreCase(initialProv) || "google".equalsIgnoreCase(initialProv)
+                || "google translate".equalsIgnoreCase(initialProv)) {
             matchedVal = "Google Translate";
         } else if ("openapi".equalsIgnoreCase(initialProv) || "openai".equalsIgnoreCase(initialProv)) {
             matchedVal = "OpenAI";
@@ -192,7 +197,13 @@ public class ConfigZoneCard extends VBox {
 
         providerSelect.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
-                aiConfig.setProvider(newVal.toLowerCase());
+                String provLower = newVal.toLowerCase();
+                aiConfig.setProvider(provLower);
+
+                AppConfig appCfg = AppConfigManager.load();
+                appCfg.setProvider(provLower);
+                AppConfigManager.save(appCfg);
+
                 if ("gemini".equalsIgnoreCase(newVal)) {
                     apiKeyField
                             .setText(aiConfig.getGemini().getApiKey() != null ? aiConfig.getGemini().getApiKey() : "");
@@ -205,6 +216,12 @@ public class ConfigZoneCard extends VBox {
                     apiKeyField.setPromptText("Enter OpenAPI API Key...");
                 }
                 checkOllamaHealth.run();
+
+                String activePath = GameHistoryManager.loadActivePath();
+                if (activePath != null && !activePath.isEmpty()) {
+                    AutoTranslatorConfigWriter.updateAutoTranslatorEndpoint(new File(activePath).getParentFile(),
+                            provLower);
+                }
             }
         });
 
@@ -246,6 +263,20 @@ public class ConfigZoneCard extends VBox {
         modelSelect.setMaxWidth(Double.MAX_VALUE);
         modelSelect.setStyle(
                 "-fx-background-color: #0b0f19; -fx-text-fill: white; -fx-background-radius: 6; -fx-padding: 4 8; -fx-border-color: #334155; -fx-border-width: 1; -fx-border-radius: 6;");
+
+        javafx.beans.binding.BooleanBinding showModelAndTemp = javafx.beans.binding.Bindings.createBooleanBinding(
+                () -> {
+                    String val = providerSelect.getValue();
+                    return val != null && !val.equalsIgnoreCase("Google Translate")
+                            && !val.equalsIgnoreCase("googletranslate")
+                            && !val.equalsIgnoreCase("google");
+                },
+                providerSelect.valueProperty());
+
+        modelLabel.visibleProperty().bind(showModelAndTemp);
+        modelLabel.managedProperty().bind(modelLabel.visibleProperty());
+        modelSelect.visibleProperty().bind(showModelAndTemp);
+        modelSelect.managedProperty().bind(modelSelect.visibleProperty());
 
         String defaultModel = "gemma2:2b";
         if ("gemini".equals(aiConfig.getProvider())) {
@@ -330,6 +361,20 @@ public class ConfigZoneCard extends VBox {
 
         VBox tempBox = new VBox(2, tempSliderRow, tempTipLabel);
         tempBox.setAlignment(Pos.CENTER_LEFT);
+
+        javafx.beans.binding.BooleanBinding showModelAndTemp = javafx.beans.binding.Bindings.createBooleanBinding(
+                () -> {
+                    String val = providerSelect.getValue();
+                    return val != null && !val.equalsIgnoreCase("Google Translate")
+                            && !val.equalsIgnoreCase("googletranslate")
+                            && !val.equalsIgnoreCase("google");
+                },
+                providerSelect.valueProperty());
+
+        tempLabel.visibleProperty().bind(showModelAndTemp);
+        tempLabel.managedProperty().bind(tempLabel.visibleProperty());
+        tempBox.visibleProperty().bind(showModelAndTemp);
+        tempBox.managedProperty().bind(tempBox.visibleProperty());
 
         grid.add(tempLabel, 0, 3);
         grid.add(tempBox, 1, 3);

@@ -46,7 +46,7 @@
   "Die" : "chết",
   "item" : "vật phẩm",
   "Dead" : "Chết",
-  "RMB" : "Cân bằng chuột phải (RMB)",
+  "RMB" : "RMB",
   "Run" : "Chạy",
   "lever" : "cần gạt",
   "hotbar" : "thanh nhanh",
@@ -74,5 +74,8 @@
   "ERROR" : "LỖI",
   "Discord" : "Discord",
   "Settings" : "Cài đặt",
-  "Play" : "Chơi"
+  "Play" : "Chơi",
+  "Loading..." : "Đang tải...",
+  "Mods" : "Mods",
+  "Inventory" : "Kho đồ"
 }

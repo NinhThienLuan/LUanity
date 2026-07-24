@@ -25,6 +25,7 @@ public class ActionsZoneCard extends VBox {
 
     private final Stage stage;
     private final TranslateExecutor translateExecutor;
+    private final com.aiwrapper.config.AiConfig aiConfig;
     private final ObservableList<TranslationItem> historyList;
     private final Runnable onCacheChange;
 
@@ -43,6 +44,7 @@ public class ActionsZoneCard extends VBox {
         super(14);
         this.stage = stage;
         this.translateExecutor = translateExecutor;
+        this.aiConfig = aiConfig;
         this.historyList = historyList;
         this.onCacheChange = onCacheChange;
 
@@ -550,6 +552,12 @@ public class ActionsZoneCard extends VBox {
                                 if (onConsoleLog != null)
                                     onConsoleLog.accept(msg);
                             }));
+                    try {
+                        AutoTranslatorConfigWriter.updateAutoTranslatorEndpoint(gameExe.getParentFile(),
+                                aiConfig.getProvider());
+                    } catch (Exception ex) {
+                        System.err.println("Failed to update config endpoint: " + ex.getMessage());
+                    }
                     javafx.application.Platform.runLater(() -> {
                         btnSetup.setDisable(false);
                         btnSetup.setText("⬇ Cài BepInEx + AutoTranslator");
