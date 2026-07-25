@@ -138,6 +138,12 @@ public class TranslateExecutor implements BaseExecutor {
         if (text == null || text.trim().isEmpty()) {
             return java.util.concurrent.CompletableFuture.completedFuture(text);
         }
+        if (shouldBypassTranslation(text)) {
+            return java.util.concurrent.CompletableFuture.completedFuture(text);
+        }
+        if (text.contains("===") || text.contains("\n")) {
+            return java.util.concurrent.CompletableFuture.supplyAsync(() -> translateSingle(text, options));
+        }
 
         syncFromDisk();
 
@@ -203,6 +209,24 @@ public class TranslateExecutor implements BaseExecutor {
             return java.util.concurrent.CompletableFuture.completedFuture(exactMatch.value);
         }
 
+        // Static hotkey bypass:
+        String staticTrans = getStaticTranslation(text);
+        if (staticTrans != null) {
+            if (listener != null) {
+                listener.onTranslation(text, staticTrans, "Static_Key", text.length());
+            }
+            if (!cacheMap.containsKey(text)) {
+                cacheMap.put(text, staticTrans);
+                if (gameCacheFile != null) {
+                    try {
+                        mapper.writerWithDefaultPrettyPrinter().writeValue(gameCacheFile, cacheMap);
+                    } catch (Exception e) {
+                    }
+                }
+            }
+            return java.util.concurrent.CompletableFuture.completedFuture(staticTrans);
+        }
+
         Map<String, String> glossaryMap = resolveActiveGlossary(activePresetName);
 
         Map<String, String> matchedGlossary = new java.util.HashMap<>();
@@ -220,33 +244,37 @@ public class TranslateExecutor implements BaseExecutor {
         final Map<String, String> finalCacheMap = cacheMap;
 
         return batchQueue.queue(text, preservedText, matchedGlossary, preserver, options)
-                .thenApply(translatedValue -> {
+                .thenCompose(translatedValue -> {
                     String cleaned = cleanRawTranslation(text, translatedValue);
-                    if (isRefusalOrJunk(cleaned)) {
-                        if (listener != null) {
-                            listener.onTranslation(text, text, "AI_Refused", text.length());
-                        }
-                        return text;
+                    if (isRefusalOrJunk(cleaned) || isInvalidTranslation(text, cleaned)) {
+                        return retryTranslateSingleAsync(text, preservedText, matchedGlossary, preserver, options);
                     }
                     String restored = preserver.restore(cleaned);
-
-                    finalCacheMap.put(text, restored);
-                    if (finalGameCacheFile != null) {
-                        try {
-                            File parent = finalGameCacheFile.getParentFile();
-                            if (parent != null && !parent.exists()) {
-                                parent.mkdirs();
+                    if (isInvalidTranslation(text, restored)) {
+                        return retryTranslateSingleAsync(text, preservedText, matchedGlossary, preserver, options);
+                    }
+                    return java.util.concurrent.CompletableFuture.completedFuture(restored);
+                })
+                .thenApply(restoredValue -> {
+                    if (!isInvalidTranslation(text, restoredValue)) {
+                        finalCacheMap.put(text, restoredValue);
+                        if (finalGameCacheFile != null) {
+                            try {
+                                File parent = finalGameCacheFile.getParentFile();
+                                if (parent != null && !parent.exists()) {
+                                    parent.mkdirs();
+                                }
+                                mapper.writerWithDefaultPrettyPrinter().writeValue(finalGameCacheFile, finalCacheMap);
+                            } catch (Exception ex) {
+                                // Ignore
                             }
-                            mapper.writerWithDefaultPrettyPrinter().writeValue(finalGameCacheFile, finalCacheMap);
-                        } catch (Exception ex) {
-                            // Ignore
                         }
                     }
 
                     if (listener != null) {
-                        listener.onTranslation(text, restored, "AI", text.length());
+                        listener.onTranslation(text, restoredValue, "AI", text.length());
                     }
-                    return restored;
+                    return restoredValue;
                 }).exceptionally(ex -> {
                     if (listener != null) {
                         listener.onTranslation(text, "[ERROR] " + ex.getMessage(), "AI_Error", text.length());
@@ -614,6 +642,26 @@ public class TranslateExecutor implements BaseExecutor {
             return exactMatch.value;
         }
 
+        // Static hotkey bypass:
+        String staticTrans = getStaticTranslation(text);
+        if (staticTrans != null) {
+            boolean skipCacheWrite = (options != null && options.containsKey("skipCacheWrite")
+                    && (boolean) options.get("skipCacheWrite"));
+            if (listener != null && !skipCacheWrite) {
+                listener.onTranslation(text, staticTrans, "Static_Key", text.length());
+            }
+            if (!cacheMap.containsKey(text)) {
+                cacheMap.put(text, staticTrans);
+                if (gameCacheFile != null) {
+                    try {
+                        mapper.writerWithDefaultPrettyPrinter().writeValue(gameCacheFile, cacheMap);
+                    } catch (Exception e) {
+                    }
+                }
+            }
+            return staticTrans;
+        }
+
         // Load Glossary
         Map<String, String> glossaryMap = resolveActiveGlossary(activePresetName);
 
@@ -661,30 +709,45 @@ public class TranslateExecutor implements BaseExecutor {
             String rawTranslation = ai.complete(prompt, options != null ? options : Map.of());
             String cleanedRaw = cleanRawTranslation(text, rawTranslation);
 
-            if (isRefusalOrJunk(cleanedRaw)) {
+            if (isRefusalOrJunk(cleanedRaw) || isInvalidTranslation(text, cleanedRaw)) {
                 String simplePrompt = "Translate this " + fromName + " text to " + toName
                         + " (only return the translation, no explanation): "
                         + text;
                 try {
                     String retryRaw = ai.complete(simplePrompt, options != null ? options : Map.of());
                     String retryCleaned = cleanRawTranslation(text, retryRaw);
-                    if (!isRefusalOrJunk(retryCleaned)) {
+                    if (!isRefusalOrJunk(retryCleaned) && !isInvalidTranslation(text, retryCleaned)) {
                         cleanedRaw = retryCleaned;
                     } else {
+                        cleanedRaw = retryTranslateSingleSync(text, preservedText, matchedGlossary, preserver, options);
+                        if (isInvalidTranslation(text, cleanedRaw)) {
+                            if (listener != null) {
+                                listener.onTranslation(text, text, "AI_Refused", text.length());
+                            }
+                            return text; // Do not save or cache refusal
+                        }
+                    }
+                } catch (Exception ex) {
+                    cleanedRaw = retryTranslateSingleSync(text, preservedText, matchedGlossary, preserver, options);
+                    if (isInvalidTranslation(text, cleanedRaw)) {
                         if (listener != null) {
                             listener.onTranslation(text, text, "AI_Refused", text.length());
                         }
-                        return text; // Do not save or cache refusal
+                        return text;
                     }
-                } catch (Exception ex) {
+                }
+            }
+
+            translated = preserver.restore(cleanedRaw);
+            if (isInvalidTranslation(text, translated)) {
+                translated = retryTranslateSingleSync(text, preservedText, matchedGlossary, preserver, options);
+                if (isInvalidTranslation(text, translated)) {
                     if (listener != null) {
                         listener.onTranslation(text, text, "AI_Refused", text.length());
                     }
                     return text;
                 }
             }
-
-            translated = preserver.restore(cleanedRaw);
 
             // Apply glossary fallback replacements
             for (Map.Entry<String, String> entry : matchedGlossary.entrySet()) {
@@ -737,10 +800,73 @@ public class TranslateExecutor implements BaseExecutor {
         return translated;
     }
 
-    private boolean shouldBypassTranslation(String text) {
+    boolean shouldBypassTranslation(String text) {
         if (text == null)
             return false;
         String trimmed = text.trim();
+
+        // Check for XML/BBCode tags only if '<' is present
+        if (trimmed.contains("<")) {
+            int len = trimmed.length();
+            // 1. Unclosed tag starts scan
+            int currentPos = 0;
+            while (currentPos < len) {
+                int openIdx = trimmed.indexOf('<', currentPos);
+                if (openIdx == -1)
+                    break;
+                if (openIdx + 1 < len) {
+                    char nextChar = trimmed.charAt(openIdx + 1);
+                    if (Character.isLetter(nextChar) || nextChar == '/') {
+                        int closeIdx = trimmed.indexOf('>', openIdx);
+                        if (closeIdx == -1) {
+                            return true; // Bypass
+                        }
+                    }
+                }
+                currentPos = openIdx + 1;
+            }
+
+            // 2. Unopened tag ends scan
+            currentPos = 0;
+            while (currentPos < len) {
+                int closeIdx = trimmed.indexOf('>', currentPos);
+                if (closeIdx == -1)
+                    break;
+                int openIdx = trimmed.lastIndexOf('<', closeIdx);
+                if (openIdx == -1) {
+                    return true; // Bypass
+                }
+                currentPos = closeIdx + 1;
+            }
+
+            // 3. Stack-based nesting check
+            java.util.regex.Pattern tagPattern = java.util.regex.Pattern
+                    .compile("(?i)</?([a-zA-Z]+)(?:=[^<>\\s]+)?/?>");
+            java.util.regex.Matcher m = tagPattern.matcher(trimmed);
+            java.util.Stack<String> tagStack = new java.util.Stack<>();
+            while (m.find()) {
+                String fullTag = m.group(0);
+                String tagName = m.group(1).toLowerCase();
+
+                if (fullTag.startsWith("</")) {
+                    if (tagStack.isEmpty()) {
+                        return true;
+                    }
+                    String top = tagStack.pop();
+                    if (!top.equals(tagName)) {
+                        return true;
+                    }
+                } else if (fullTag.endsWith("/>")) {
+                    // Ignore self-closing tags
+                } else {
+                    tagStack.push(tagName);
+                }
+            }
+            if (!tagStack.isEmpty()) {
+                return true;
+            }
+        }
+
         return trimmed.matches(
                 "(?i)^[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*((kg|g|l|s|m|h|M|xp|exp|lv|lvl|v|hz|fps|ping|ms|am|pm|sec|min|hr|d|km|km/h|lbs|mph|ml|oz|px|pt|in|ft|yd)\\b[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*)*$");
     }
@@ -916,6 +1042,211 @@ public class TranslateExecutor implements BaseExecutor {
                 || lower.contains("could you please")
                 || lower.contains("sorry, but")
                 || lower.contains("unrelated details");
+    }
+
+    boolean isInvalidTranslation(String originalText, String translatedText) {
+        if (translatedText == null) {
+            return true;
+        }
+
+        // 1. CJK Leak check
+        boolean origHasCjk = originalText.matches(".*[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}].*");
+        if (!origHasCjk && "vi".equalsIgnoreCase(toLang)) {
+            if (translatedText.matches(".*[\\p{IsHan}\\p{IsHiragana}\\p{IsKatakana}\\p{IsHangul}].*")) {
+                return true; // Rejected
+            }
+        }
+
+        // 2. Length abnormality check
+        int origLen = originalText.length();
+        int transLen = translatedText.length();
+        if (origLen > 0) {
+            if (origLen <= 3 && transLen > 15) {
+                return true; // Rejected
+            }
+            if (origLen > 3 && transLen > origLen * 4) {
+                return true; // Rejected
+            }
+        }
+
+        // 3. Contextual code leak check
+        boolean origHasBrackets = originalText.contains("{") || originalText.contains("}");
+        boolean transHasBrackets = translatedText.contains("{") || translatedText.contains("}");
+        if (!origHasBrackets && transHasBrackets) {
+            return true; // Output introduced brackets not in original
+        }
+
+        if (translatedText.matches(".*\\b(class|public|private|protected|import|void|return|static|final|new)\\b.*")) {
+            if (translatedText.matches(
+                    ".*\\b(public|private|protected|static|final)\\s+(class|void|int|String|boolean|double|float)\\b.*")
+                    ||
+                    translatedText.matches(".*\\bimport\\s+[a-zA-Z0-9_\\.]+\\s*;.*") ||
+                    translatedText.matches(".*\\b(class)\\s+[a-zA-Z0-9_]+\\s*\\{.*") ||
+                    translatedText.contains("System.out.print") ||
+                    translatedText.matches(".*\\b(return)\\s+[a-zA-Z0-9_]+\\s*;.*") ||
+                    translatedText.matches(".*\\b(public|private|protected)\\s+[a-zA-Z0-9_]+\\s*\\(.*")) {
+                return true; // Rejected code leak
+            }
+        }
+
+        // 4. Parenthetical explanation filter
+        boolean origHasParen = originalText.contains("(");
+        boolean transHasParen = translatedText.contains("(");
+        if (!origHasParen && transHasParen) {
+            String lowerTrans = translatedText.toLowerCase();
+            java.util.regex.Pattern parenPattern = java.util.regex.Pattern.compile("\\(([^\\)]+)\\)");
+            java.util.regex.Matcher pm = parenPattern.matcher(lowerTrans);
+            while (pm.find()) {
+                String inside = pm.group(1).trim();
+                boolean matchesKeyword = inside
+                        .matches(".*(không|chưa|lỗi|dịch|chuỗi|not|no|only|explain|chú thích|nghĩa|từ|bản dịch|cụm).*");
+                int wordCount = inside.split("\\s+").length;
+                if (matchesKeyword && (wordCount > 2 || inside.contains("không thể") || inside.contains("chưa thể")
+                        || inside.contains("thay đổi"))) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private String getStaticTranslation(String text) {
+        if (text == null)
+            return null;
+        String trimmed = text.trim();
+        if (trimmed.isEmpty())
+            return null;
+        String lower = trimmed.toLowerCase();
+
+        // 1. Single character check
+        if (trimmed.length() == 1) {
+            char c = trimmed.charAt(0);
+            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                    "+-*/[](){}=<>?!.,:;@#$_%^&|\\~`\"'".indexOf(c) >= 0) {
+                return trimmed;
+            }
+        }
+
+        // 2. Mouse action shorthand
+        if (lower.equals("lmb") || lower.equals("rmb") || lower.equals("mmb")) {
+            return trimmed.toUpperCase();
+        }
+
+        // 3. Function keys (F1-F12)
+        if (lower.matches("f\\d{1,2}")) {
+            return trimmed.toUpperCase();
+        }
+
+        // 4. Keyboard combination checking
+        if (trimmed.contains("+")) {
+            String[] parts = trimmed.split("\\s*\\+\\s*");
+            boolean allValid = true;
+            for (String part : parts) {
+                String pLower = part.trim().toLowerCase();
+                boolean isValidPart = pLower.length() == 1 ||
+                        pLower.matches("f\\d{1,2}") ||
+                        pLower.equals("lmb") || pLower.equals("rmb") || pLower.equals("mmb") ||
+                        pLower.equals("ctrl") || pLower.equals("alt") || pLower.equals("shift") ||
+                        pLower.equals("win") || pLower.equals("cmd") || pLower.equals("tab") ||
+                        pLower.equals("space") || pLower.equals("enter") || pLower.equals("esc") ||
+                        pLower.equals("escape") || pLower.equals("delete") || pLower.equals("backspace") ||
+                        pLower.matches("up|down|left|right");
+                if (!isValidPart) {
+                    allValid = false;
+                    break;
+                }
+            }
+            if (allValid) {
+                List<String> cleanedParts = new java.util.ArrayList<>();
+                for (String part : parts) {
+                    String pTrim = part.trim();
+                    if (pTrim.length() == 1) {
+                        cleanedParts.add(pTrim.toUpperCase());
+                    } else {
+                        cleanedParts.add(Character.toUpperCase(pTrim.charAt(0)) + pTrim.substring(1).toLowerCase());
+                    }
+                }
+                return String.join(" + ", cleanedParts);
+            }
+        }
+
+        return null;
+    }
+
+    private java.util.concurrent.CompletableFuture<String> retryTranslateSingleAsync(
+            String originalText, String preservedText, Map<String, String> glossary,
+            TagPreserver preserver, Map<String, Object> options) {
+
+        return java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+            try {
+                Map<String, Object> retryOpts = new java.util.HashMap<>(options != null ? options : Map.of());
+                retryOpts.put("temperature", 0.4);
+                retryOpts.put("seed", java.util.concurrent.ThreadLocalRandom.current().nextInt(1, 1000));
+
+                StringBuilder glossaryPrompt = new StringBuilder(preservedText);
+                if (glossary != null && !glossary.isEmpty()) {
+                    glossaryPrompt.append("\n\nYêu cầu dịch các thuật ngữ sau chính xác như mô tả:\n");
+                    for (Map.Entry<String, String> entry : glossary.entrySet()) {
+                        glossaryPrompt.append("- \"").append(entry.getKey()).append("\" -> \"").append(entry.getValue())
+                                .append("\"\n");
+                    }
+                }
+
+                PromptTemplate activeTemplate = new PromptTemplate(promptTemplateString);
+                String promptText = activeTemplate.render(Map.of("text", glossaryPrompt.toString()));
+
+                AiProvider provider = aiFactory.get();
+                String raw = provider.complete(promptText, retryOpts);
+                String cleaned = cleanRawTranslation(originalText, raw);
+                if (isRefusalOrJunk(cleaned) || isInvalidTranslation(originalText, cleaned)) {
+                    return originalText;
+                }
+                String restored = preserver.restore(cleaned);
+                if (isInvalidTranslation(originalText, restored)) {
+                    return originalText;
+                }
+                return restored;
+            } catch (Exception ex) {
+                return originalText;
+            }
+        });
+    }
+
+    private String retryTranslateSingleSync(
+            String originalText, String preservedText, Map<String, String> glossary,
+            TagPreserver preserver, Map<String, Object> options) {
+        try {
+            Map<String, Object> retryOpts = new java.util.HashMap<>(options != null ? options : Map.of());
+            retryOpts.put("temperature", 0.4);
+            retryOpts.put("seed", java.util.concurrent.ThreadLocalRandom.current().nextInt(1, 1000));
+
+            StringBuilder glossaryPrompt = new StringBuilder(preservedText);
+            if (glossary != null && !glossary.isEmpty()) {
+                glossaryPrompt.append("\n\nYêu cầu dịch các thuật ngữ sau chính xác như mô tả:\n");
+                for (Map.Entry<String, String> entry : glossary.entrySet()) {
+                    glossaryPrompt.append("- \"").append(entry.getKey()).append("\" -> \"").append(entry.getValue())
+                            .append("\"\n");
+                }
+            }
+
+            PromptTemplate activeTemplate = new PromptTemplate(promptTemplateString);
+            String promptText = activeTemplate.render(Map.of("text", glossaryPrompt.toString()));
+
+            AiProvider provider = aiFactory.get();
+            String raw = provider.complete(promptText, retryOpts);
+            String cleaned = cleanRawTranslation(originalText, raw);
+            if (isRefusalOrJunk(cleaned) || isInvalidTranslation(originalText, cleaned)) {
+                return originalText;
+            }
+            String restored = preserver.restore(cleaned);
+            if (isInvalidTranslation(originalText, restored)) {
+                return originalText;
+            }
+            return restored;
+        } catch (Exception ex) {
+            return originalText;
+        }
     }
 
     public void updateCacheValue(String original, String translated) {

@@ -43,8 +43,10 @@ public class GeminiProvider implements AiProvider {
         Map<String, Object> requestBody = new HashMap<>();
         requestBody.put("contents", List.of(contentObj));
 
+        Map<String, Object> generationConfig = new HashMap<>();
+        generationConfig.put("temperature", 0.0);
+
         if (options != null && !options.isEmpty()) {
-            Map<String, Object> generationConfig = new HashMap<>();
             if (options.containsKey("temperature")) {
                 generationConfig.put("temperature", options.get("temperature"));
             }
@@ -61,10 +63,8 @@ public class GeminiProvider implements AiProvider {
                     generationConfig.putAll(rawConfigMap);
                 }
             }
-            if (!generationConfig.isEmpty()) {
-                requestBody.put("generationConfig", generationConfig);
-            }
         }
+        requestBody.put("generationConfig", generationConfig);
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
         @SuppressWarnings("unchecked")

@@ -49,14 +49,24 @@ public class OpenApiProvider implements AiProvider {
                 : "gpt-4o-mini");
         requestBody.put("messages", List.of(messagePart));
 
-        double temperature = 0.2;
-        if (options != null && options.containsKey("temperature")) {
-            Object rawTemp = options.get("temperature");
-            if (rawTemp instanceof Number) {
-                temperature = ((Number) rawTemp).doubleValue();
+        double temperature = 0.0;
+        int seed = 42;
+        if (options != null) {
+            if (options.containsKey("temperature")) {
+                Object rawTemp = options.get("temperature");
+                if (rawTemp instanceof Number) {
+                    temperature = ((Number) rawTemp).doubleValue();
+                }
+            }
+            if (options.containsKey("seed")) {
+                Object rawSeed = options.get("seed");
+                if (rawSeed instanceof Number) {
+                    seed = ((Number) rawSeed).intValue();
+                }
             }
         }
         requestBody.put("temperature", temperature);
+        requestBody.put("seed", seed);
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(requestBody, headers);
         @SuppressWarnings("unchecked")

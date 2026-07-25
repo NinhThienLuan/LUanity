@@ -31,9 +31,9 @@ public class OllamaProvider implements AiProvider {
         request.put("stream", false);
 
         Map<String, Object> ollamaOptions = new HashMap<>();
-        if (config.getTemperature() != null) {
-            ollamaOptions.put("temperature", config.getTemperature());
-        }
+        // Set default deterministic options:
+        ollamaOptions.put("temperature", 0.0);
+        ollamaOptions.put("seed", 42);
 
         if (options != null && !options.isEmpty()) {
             if (options.containsKey("temperature")) {

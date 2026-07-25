@@ -162,7 +162,7 @@ public class TranslationBatchQueue implements InitializingBean {
                     // Prompt-based batching (Gemini, Ollama, OpenAI)
                     StringBuilder promptBuilder = new StringBuilder();
                     for (int i = 0; i < batch.size(); i++) {
-                        promptBuilder.append((i + 1)).append(": ").append(batch.get(i).preservedText).append("\n");
+                        promptBuilder.append(batch.get(i).preservedText).append(" === \n");
                     }
 
                     Map<String, String> mergedGlossary = new LinkedHashMap<>();
@@ -174,7 +174,8 @@ public class TranslationBatchQueue implements InitializingBean {
 
                     String promptText = promptBuilder.toString();
                     if (!mergedGlossary.isEmpty()) {
-                        StringBuilder glossaryPrompt = new StringBuilder(promptText);
+                        StringBuilder glossaryPrompt = new StringBuilder();
+                        glossaryPrompt.append(promptText);
                         glossaryPrompt.append("\n\nYêu cầu dịch các thuật ngữ sau chính xác như mô tả:\n");
                         for (Map.Entry<String, String> entry : mergedGlossary.entrySet()) {
                             glossaryPrompt.append("- \"").append(entry.getKey()).append("\" -> \"")
@@ -183,7 +184,7 @@ public class TranslationBatchQueue implements InitializingBean {
                         promptText = glossaryPrompt.toString();
                     }
 
-                    String promptTemplateString = "Translate the following list into Vietnamese. Return only the translated items as a numbered list preserving the exact number labels (e.g. 1:, 2:):\n\n{text}";
+                    String promptTemplateString = "Translate the following list into Vietnamese. Return ONLY the translations in the exact format: Original Text === Translation. Do not modify the original text on the left hand side of the '==='. Only reply with the translated list:\n\n{text}";
                     PromptTemplate activeTemplate = new PromptTemplate(promptTemplateString);
 
                     Map<String, Object> firstOptions = batch.get(0).options != null ? batch.get(0).options : Map.of();
@@ -191,30 +192,53 @@ public class TranslationBatchQueue implements InitializingBean {
 
                     String rawResponse = provider.complete(prompt, firstOptions);
 
-                    Map<Integer, String> resultsMap = parseNumberedList(rawResponse);
-
-                    boolean success = true;
-                    for (int i = 1; i <= batch.size(); i++) {
-                        if (!resultsMap.containsKey(i)) {
-                            success = false;
-                            break;
+                    Map<String, List<String>> resultsMap = new HashMap<>();
+                    String[] lines = rawResponse.split("\\r?\\n");
+                    for (String line : lines) {
+                        if (line.contains("===")) {
+                            int idx = line.indexOf("===");
+                            String origPart = line.substring(0, idx).trim();
+                            String transPart = line.substring(idx + 3).trim();
+                            if (origPart.startsWith("\"") && origPart.endsWith("\"") && origPart.length() >= 2) {
+                                origPart = origPart.substring(1, origPart.length() - 1);
+                            }
+                            if (transPart.startsWith("\"") && transPart.endsWith("\"") && transPart.length() >= 2) {
+                                transPart = transPart.substring(1, transPart.length() - 1);
+                            }
+                            String normKey = normalizeKey(origPart);
+                            resultsMap.computeIfAbsent(normKey, k -> new ArrayList<>()).add(transPart.trim());
                         }
                     }
 
-                    if (success) {
+                    Map<String, Integer> usageMap = new HashMap<>();
+                    List<QueueItem> failedItems = new ArrayList<>();
+
+                    for (QueueItem item : batch) {
+                        String normKey = normalizeKey(item.preservedText);
+                        List<String> transList = resultsMap.get(normKey);
+                        int useIdx = usageMap.getOrDefault(normKey, 0);
+                        if (transList != null && useIdx < transList.size()) {
+                            String translatedVal = transList.get(useIdx);
+                            item.future.complete(translatedVal);
+                            usageMap.put(normKey, useIdx + 1);
+                        } else {
+                            failedItems.add(item);
+                        }
+                    }
+
+                    if (failedItems.size() < batch.size()) {
                         String doneTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
                                 .format(java.time.LocalTime.now());
                         System.out.println(doneTime + "  INFO --- [proxy] : Batch completed successfully ("
-                                + batch.size() + " items).");
-                        for (int i = 0; i < batch.size(); i++) {
-                            batch.get(i).future.complete(resultsMap.get(i + 1));
-                        }
-                    } else {
+                                + (batch.size() - failedItems.size()) + "/" + batch.size() + " items).");
+                    }
+
+                    if (!failedItems.isEmpty()) {
                         String doneTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
                                 .format(java.time.LocalTime.now());
-                        System.out.println(doneTime
-                                + "  WARN --- [proxy] : Batch parsing failed. Retrying batch items individually...");
-                        fallbackTranslateIndividually(batch);
+                        System.out.println(doneTime + "  WARN --- [proxy] : " + failedItems.size()
+                                + " items in batch failed alignment. Retrying individually...");
+                        fallbackTranslateIndividually(failedItems);
                     }
                     return "SUCCESS";
                 }
@@ -226,28 +250,11 @@ public class TranslationBatchQueue implements InitializingBean {
         }
     }
 
-    private Map<Integer, String> parseNumberedList(String text) {
-        Map<Integer, String> results = new HashMap<>();
-        if (text == null)
-            return results;
-        String[] lines = text.split("\\r?\\n");
-        for (String line : lines) {
-            line = line.trim();
-            if (line.isEmpty())
-                continue;
-            java.util.regex.Pattern p = java.util.regex.Pattern.compile("^(\\d+)[\\.:\\-\\s]+(.*)$");
-            java.util.regex.Matcher m = p.matcher(line);
-            if (m.find()) {
-                try {
-                    int index = Integer.parseInt(m.group(1));
-                    String val = m.group(2).trim();
-                    results.put(index, val);
-                } catch (Exception e) {
-                    // Ignore
-                }
-            }
-        }
-        return results;
+    private String normalizeKey(String key) {
+        if (key == null)
+            return "";
+        String clean = key.replaceAll("[\\uFEFF\\u200B\\u200C\\u200D\\u200E\\u200F\\u2070-\\u209F]", "");
+        return clean.trim().toLowerCase();
     }
 
     private void fallbackTranslateIndividually(List<QueueItem> batch) {

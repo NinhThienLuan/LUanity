@@ -180,4 +180,32 @@ public class TagPreservationTest {
                 "text", "你好"));
         assertEquals("Translate Chinese to Vietnamese: 你好", rendered);
     }
+
+    @Test
+    public void testQualityGateOptAndBypasses() throws Exception {
+        TranslateExecutor executor = new TranslateExecutor(null);
+
+        // 1. BBCode Tag Bypass Verification
+        // Unclosed tag start
+        assertTrue(executor.shouldBypassTranslation("Save Slot : 3 <size\\"));
+        // Nesting mismatch
+        assertTrue(executor.shouldBypassTranslation("<b><i>text</b></i>"));
+        // Unopened tag end
+        assertTrue(executor.shouldBypassTranslation("text</b>"));
+        // Fully balanced
+        assertFalse(executor.shouldBypassTranslation("<b><i>text</i></b>"));
+        // Mathematical / Standalone operator
+        assertFalse(executor.shouldBypassTranslation("HP < 50%"));
+        assertFalse(executor.shouldBypassTranslation("Damage > 100"));
+
+        // 2. Parenthetical explanation gate verification
+        executor.setLanguagePair("EN/VI");
+
+        // Explanation added
+        assertTrue(executor.isInvalidTranslation("BuildingName", "BuildingName (không thay đổi)"));
+        assertTrue(executor.isInvalidTranslation("小鸭子adasdasdasdasd",
+                "小鸭子adasdasdasdasd (Không thể dịch chính xác do có lỗi)"));
+        // Normal parenthesis allowed
+        assertFalse(executor.isInvalidTranslation("Frames Per Second", "FPS (khung hình/giây)"));
+    }
 }
