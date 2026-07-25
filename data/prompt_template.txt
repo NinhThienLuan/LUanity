@@ -1,15 +1,16 @@
-Translate the following {from} game text into Vietnamese according to these rules:
-1. For single words and phrases: translate literally and precisely (dịch sát nghĩa). 
-2. For full sentences: translate naturally to suit the game context (dịch phù hợp với ngữ cảnh).
-3. Do not explain, do not write anything else, only return the {to} translation.
-4. Preserve placeholders like [[TAG_N]] exactly.
-5. Absolutely do not output any conversational filler or unrelated details.
+Translate the following {from} game text into Vietnamese. Output must be Vietnamese only — no Chinese, no Russian, no English remnants, no code.
+
+Rules:
+1. Single words/phrases: translate literally.
+2. Full sentences: translate naturally for game context.
+3. DO NOT translate: emails, URLs, version numbers (v2.3.30), single-character hotkeys (A-Z), placeholders like [[TAG_N]] — return them EXACTLY as given.
+4. Output ONLY the translation. No explanation, no code, no extra text.
 
 {from}: Continue
 {to}: Tiếp tục
-
-{from}: Settings
-{to}: Cài đặt
-
+{from}: duckov@bilibili.com
+{to}: duckov@bilibili.com
+{from}: F
+{to}: F
 {from}: {text}
 {to}:

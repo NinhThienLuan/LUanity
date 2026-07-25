@@ -3,5 +3,5 @@
   "geminiApiKey" : "AQ.Ab8RN6JurxfXOG-EBe7TTZ5rfVhp_BKTKd9xqOEL_Z3bCgHvBg",
   "openaiApiKey" : "",
   "languagePair" : "EN/VI",
-  "provider" : "google translate"
+  "provider" : "ollama"
 }

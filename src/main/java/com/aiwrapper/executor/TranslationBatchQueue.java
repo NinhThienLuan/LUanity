@@ -35,7 +35,7 @@ public class TranslationBatchQueue implements InitializingBean {
         }
     }
 
-    private final LinkedBlockingQueue<QueueItem> queue = new LinkedBlockingQueue<>();
+    private final LinkedBlockingDeque<QueueItem> queue = new LinkedBlockingDeque<>();
     private final AiProviderFactory aiFactory;
     private final RateLimitBackoffHandler backoffHandler;
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -88,18 +88,26 @@ public class TranslationBatchQueue implements InitializingBean {
                         break;
 
                     QueueItem next = queue.peek();
-                    if (next == null)
-                        break;
+                    if (next == null) {
+                        next = queue.poll(remaining, TimeUnit.MILLISECONDS);
+                        if (next == null) {
+                            break; // timed out
+                        }
+                    } else {
+                        next = queue.poll();
+                    }
+
+                    if (next == null) {
+                        continue;
+                    }
 
                     if (totalChars + next.preservedText.length() > maxChars) {
+                        queue.putFirst(next);
                         break;
                     }
 
-                    next = queue.poll();
-                    if (next != null) {
-                        batch.add(next);
-                        totalChars += next.preservedText.length();
-                    }
+                    batch.add(next);
+                    totalChars += next.preservedText.length();
                 }
 
                 if (!batch.isEmpty()) {
