@@ -28,7 +28,9 @@ public class ProxyController {
         if (text == null || text.trim().isEmpty()) {
             return java.util.concurrent.CompletableFuture.completedFuture(ResponseEntity.ok(""));
         }
-        System.out.println("HTTP GET Proxy request: [" + from + " -> " + to + "] text: " + text);
+        String time = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS").format(java.time.LocalTime.now());
+        System.out.println(
+                time + "  INFO --- [proxy] : HTTP GET Proxy request: [" + from + " -> " + to + "] text: " + text);
         return translateExecutor.translateSingleAsync(text, Map.of())
                 .thenApply(ResponseEntity::ok)
                 .exceptionally(ex -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -49,7 +51,8 @@ public class ProxyController {
         if (query == null || query.trim().isEmpty()) {
             return java.util.concurrent.CompletableFuture.completedFuture(ResponseEntity.ok(""));
         }
-        System.out.println("HTTP POST Proxy request: " + query);
+        String time = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS").format(java.time.LocalTime.now());
+        System.out.println(time + "  INFO --- [proxy] : HTTP POST Proxy request: " + query);
         return translateExecutor.translateSingleAsync(query, Map.of())
                 .thenApply(ResponseEntity::ok)
                 .exceptionally(ex -> ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

@@ -116,6 +116,12 @@ public class TranslationBatchQueue implements InitializingBean {
     }
 
     private void executeBatch(List<QueueItem> batch, TranslationProviderConstraints constraints) {
+        String time = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS").format(java.time.LocalTime.now());
+        System.out.println(time + "  INFO --- [proxy] : Sending translation batch of " + batch.size() + " items using "
+                + constraints.getClass().getSimpleName() + "...");
+        for (int i = 0; i < batch.size(); i++) {
+            System.out.println("                   - [" + (i + 1) + "] " + batch.get(i).preservedText);
+        }
         try {
             backoffHandler.executeWithRetry(provider -> {
                 if (constraints.supportsBatchNative()) {
@@ -132,6 +138,10 @@ public class TranslationBatchQueue implements InitializingBean {
                     List<String> results = objectMapper.readValue(responsePayload, new TypeReference<List<String>>() {
                     });
                     if (results.size() == batch.size()) {
+                        String doneTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+                                .format(java.time.LocalTime.now());
+                        System.out.println(doneTime + "  INFO --- [proxy] : Batch completed successfully ("
+                                + batch.size() + " items).");
                         for (int i = 0; i < batch.size(); i++) {
                             batch.get(i).future.complete(results.get(i));
                         }
@@ -184,12 +194,18 @@ public class TranslationBatchQueue implements InitializingBean {
                     }
 
                     if (success) {
+                        String doneTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+                                .format(java.time.LocalTime.now());
+                        System.out.println(doneTime + "  INFO --- [proxy] : Batch completed successfully ("
+                                + batch.size() + " items).");
                         for (int i = 0; i < batch.size(); i++) {
                             batch.get(i).future.complete(resultsMap.get(i + 1));
                         }
                     } else {
-                        System.err.println(
-                                "Batch parsing failed for prompt response. Retrying batch items individually...");
+                        String doneTime = java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss.SSS")
+                                .format(java.time.LocalTime.now());
+                        System.out.println(doneTime
+                                + "  WARN --- [proxy] : Batch parsing failed. Retrying batch items individually...");
                         fallbackTranslateIndividually(batch);
                     }
                     return "SUCCESS";
