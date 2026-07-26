@@ -208,4 +208,57 @@ public class TagPreservationTest {
         // Normal parenthesis allowed
         assertFalse(executor.isInvalidTranslation("Frames Per Second", "FPS (khung hình/giây)"));
     }
+
+    @Test
+    public void testConcurrentCacheSync() throws Exception {
+        java.io.File tempFile = java.io.File.createTempFile("concurrent-cache-test", ".json");
+        tempFile.deleteOnExit();
+
+        TranslateExecutor executor = new TranslateExecutor(
+                new com.aiwrapper.provider.AiProviderFactory(new com.aiwrapper.config.AiConfig()) {
+                    @Override
+                    public com.aiwrapper.provider.AiProvider get() {
+                        return new com.aiwrapper.provider.AiProvider() {
+                            @Override
+                            public String complete(String prompt, java.util.Map<String, Object> options) {
+                                try {
+                                    Thread.sleep(50);
+                                } catch (InterruptedException e) {
+                                }
+                                return "Translation"; // Mock translation
+                            }
+                        };
+                    }
+                });
+        executor.setActiveCacheFile(tempFile);
+        executor.setLanguagePair("EN/VI");
+
+        int threadCount = 10;
+        java.util.List<java.util.concurrent.CompletableFuture<String>> futures = new java.util.ArrayList<>();
+
+        for (int i = 0; i < threadCount; i++) {
+            final String text = "Key_" + i;
+            futures.add(executor.translateSingleAsync(text, java.util.Map.of("bypassCache", true)));
+        }
+
+        java.util.concurrent.CompletableFuture.allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                .join();
+
+        // Sleep to allow debounce flush scheduler to run
+        Thread.sleep(800);
+
+        // Force call flushToDiskNow to run immediately in case scheduler is still
+        // waiting
+        executor.flushToDiskNow(tempFile.getAbsolutePath(), tempFile);
+
+        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        java.util.Map<String, String> cachedData = mapper.readValue(tempFile,
+                new com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, String>>() {
+                });
+
+        assertEquals(threadCount, cachedData.size());
+        for (int i = 0; i < threadCount; i++) {
+            assertEquals("Translation", cachedData.get("Key_" + i));
+        }
+    }
 }
