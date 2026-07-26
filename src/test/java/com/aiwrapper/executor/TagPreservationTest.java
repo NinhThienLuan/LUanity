@@ -249,7 +249,7 @@ public class TagPreservationTest {
 
         // Force call flushToDiskNow to run immediately in case scheduler is still
         // waiting
-        executor.flushToDiskNow(tempFile.getAbsolutePath(), tempFile);
+        // executor.flushToDiskNow(tempFile.getAbsolutePath(), tempFile);
 
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         java.util.Map<String, String> cachedData = mapper.readValue(tempFile,
