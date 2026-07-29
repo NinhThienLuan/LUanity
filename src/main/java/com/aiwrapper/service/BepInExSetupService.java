@@ -38,8 +38,18 @@ public class BepInExSetupService {
      * Returns true if BepInEx core DLL is present next to the given exe.
      */
     public boolean isInstalled(File gameExe) {
-        File core = new File(gameExe.getParentFile(), "BepInEx/core/BepInEx.dll");
-        return core.exists();
+        File gameRoot = gameExe.getParentFile();
+        File coreMono = new File(gameRoot, "BepInEx/core/BepInEx.dll");
+        File coreIl2cpp = new File(gameRoot, "BepInEx/core/BepInEx.Core.dll");
+        return coreMono.exists() || coreIl2cpp.exists();
+    }
+
+    /**
+     * Returns true if the game is Unity IL2CPP (presence of GameAssembly.dll).
+     */
+    public boolean isIl2Cpp(File gameExe) {
+        File gameRoot = gameExe.getParentFile();
+        return new File(gameRoot, "GameAssembly.dll").exists();
     }
 
     /**
@@ -54,27 +64,35 @@ public class BepInExSetupService {
         File gameRoot = gameExe.getParentFile();
         log.accept("[Setup] Game root: " + gameRoot.getAbsolutePath());
 
-        // 1. Detect architecture
+        // 1. Detect architecture and scripting backend
         String arch = detectArch(gameRoot);
         log.accept("[Setup] Detected architecture: " + arch);
+
+        boolean il2cpp = isIl2Cpp(gameExe);
+        log.accept("[Setup] Scripting backend: " + (il2cpp ? "IL2CPP" : "Mono"));
 
         // 2. Install BepInEx
         if (isInstalled(gameExe)) {
             log.accept("[Setup] BepInEx already installed — skipping download.");
         } else {
-            log.accept("[Setup] Fetching latest BepInEx release info ...");
-            String os = System.getProperty("os.name").toLowerCase();
+            log.accept("[Setup] Fetching BepInEx release info ...");
             String prefix;
-            if (os.contains("win")) {
-                prefix = "BepInEx_win_" + arch;
-            } else if (os.contains("mac")) {
-                prefix = "BepInEx_macos";
+            if (il2cpp) {
+                // IL2CPP uses BepInEx UnityIL2CPP
+                prefix = "BepInEx_UnityIL2CPP_" + arch;
             } else {
-                prefix = "BepInEx_linux_" + arch;
+                String os = System.getProperty("os.name").toLowerCase();
+                if (os.contains("win")) {
+                    prefix = "BepInEx_win_" + arch;
+                } else if (os.contains("mac")) {
+                    prefix = "BepInEx_macos";
+                } else {
+                    prefix = "BepInEx_linux_" + arch;
+                }
             }
 
-            String bepInExUrl = resolveDownloadUrl(BEPINEX_REPO, prefix);
-            log.accept("[Setup] Downloading: " + bepInExUrl);
+            String bepInExUrl = resolveDownloadUrl(BEPINEX_REPO, prefix, il2cpp);
+            log.accept("[Setup] Downloading BepInEx: " + bepInExUrl);
             File bepInExZip = downloadToTemp(bepInExUrl, "bepinex", ".zip", log);
             log.accept("[Setup] Extracting BepInEx to game root ...");
             unzip(bepInExZip, gameRoot, log);
@@ -85,16 +103,20 @@ public class BepInExSetupService {
         // 3. Install XUnity.AutoTranslator
         File pluginsDir = new File(gameRoot, "BepInEx/plugins");
         pluginsDir.mkdirs();
-        boolean autoTlPresent = new File(pluginsDir, "XUnity.AutoTranslator.Plugin.Core.dll").exists();
+        boolean autoTlPresent = new File(pluginsDir, "XUnity.AutoTranslator.Plugin.Core.dll").exists()
+                || new File(pluginsDir, "XUnity.AutoTranslator/XUnity.AutoTranslator.Plugin.Core.dll").exists();
         if (autoTlPresent) {
             log.accept("[Setup] XUnity.AutoTranslator already installed — skipping download.");
         } else {
-            log.accept("[Setup] Fetching latest XUnity.AutoTranslator release info ...");
-            String autoTlUrl = resolveDownloadUrl(AUTOTL_REPO, "XUnity.AutoTranslator-BepInEx-5x");
-            log.accept("[Setup] Downloading: " + autoTlUrl);
+            log.accept("[Setup] Fetching XUnity.AutoTranslator release info ...");
+            String autoTlPrefix = il2cpp ? "XUnity.AutoTranslator-BepInEx-IL2CPP-" : "XUnity.AutoTranslator-BepInEx-5x";
+            String autoTlUrl = resolveDownloadUrl(AUTOTL_REPO, autoTlPrefix, il2cpp);
+            log.accept("[Setup] Downloading AutoTranslator: " + autoTlUrl);
             File autoTlZip = downloadToTemp(autoTlUrl, "autotl", ".zip", log);
-            log.accept("[Setup] Extracting AutoTranslator to plugins ...");
-            unzip(autoTlZip, pluginsDir, log);
+            log.accept("[Setup] Extracting AutoTranslator to game root ...");
+            // Extract AutoTranslator to game root so the zip's BepInEx/... structure merges
+            // correctly
+            unzip(autoTlZip, gameRoot, log);
             autoTlZip.delete();
             log.accept("[Setup] XUnity.AutoTranslator installed.");
         }
@@ -133,8 +155,15 @@ public class BepInExSetupService {
      * Calls GitHub API to find the latest release download URL matching an asset
      * name prefix.
      */
-    private String resolveDownloadUrl(String repo, String assetPrefix) throws Exception {
-        String apiUrl = GH_API_BASE + repo + "/releases/latest";
+    private String resolveDownloadUrl(String repo, String assetPrefix, boolean il2cpp) throws Exception {
+        String apiUrl;
+        if (repo.contains("BepInEx") && il2cpp) {
+            // Find recent releases to look for UnityIL2CPP pre-releases
+            apiUrl = GH_API_BASE + repo + "/releases";
+        } else {
+            apiUrl = GH_API_BASE + repo + "/releases/latest";
+        }
+
         HttpURLConnection conn = (HttpURLConnection) new URL(apiUrl).openConnection();
         conn.setRequestProperty("Accept", "application/vnd.github+json");
         conn.setRequestProperty("User-Agent", "LUanity-Translator/1.0");
@@ -143,20 +172,39 @@ public class BepInExSetupService {
 
         try (InputStream in = conn.getInputStream()) {
             JsonNode root = MAPPER.readTree(in);
-            JsonNode assets = root.path("assets");
-            for (JsonNode asset : assets) {
-                String name = asset.path("name").asText("");
-                if (name.endsWith(".zip")) {
-                    if (repo.contains("AutoTranslator")) {
-                        // Match: XUnity.AutoTranslator-BepInEx-[version].zip
-                        // Filter out IL2CPP, IPA, MelonMod, ReiPatcher, Developer, etc.
-                        if (name.startsWith("XUnity.AutoTranslator-BepInEx-") && !name.contains("IL2CPP")) {
+            if (root.isArray()) {
+                // Releases list array
+                for (JsonNode release : root) {
+                    JsonNode assets = release.path("assets");
+                    for (JsonNode asset : assets) {
+                        String name = asset.path("name").asText("");
+                        if (name.endsWith(".zip") && name.startsWith(assetPrefix)) {
                             return asset.path("browser_download_url").asText();
                         }
-                    } else {
-                        // Standard BepInEx match
-                        if (name.startsWith(assetPrefix)) {
-                            return asset.path("browser_download_url").asText();
+                    }
+                }
+            } else {
+                // Single release object
+                JsonNode assets = root.path("assets");
+                for (JsonNode asset : assets) {
+                    String name = asset.path("name").asText("");
+                    if (name.endsWith(".zip")) {
+                        if (repo.contains("AutoTranslator")) {
+                            if (il2cpp) {
+                                // Match: XUnity.AutoTranslator-BepInEx-IL2CPP-[version].zip
+                                if (name.startsWith("XUnity.AutoTranslator-BepInEx-IL2CPP-")) {
+                                    return asset.path("browser_download_url").asText();
+                                }
+                            } else {
+                                // Match: XUnity.AutoTranslator-BepInEx-[version].zip
+                                if (name.startsWith("XUnity.AutoTranslator-BepInEx-") && !name.contains("IL2CPP")) {
+                                    return asset.path("browser_download_url").asText();
+                                }
+                            }
+                        } else {
+                            if (name.startsWith(assetPrefix)) {
+                                return asset.path("browser_download_url").asText();
+                            }
                         }
                     }
                 }

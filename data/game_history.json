@@ -1,14 +1,14 @@
 [ {
+  "name" : "Duckov",
+  "exePath" : "D:\\G\\EFD.v2.3.30_LinkNeverDie.Com\\Duckov.exe",
+  "lastUsed" : "2026-07-28T09:15:08.6310148",
+  "activePreset" : null,
+  "languagePair" : "EN/VI"
+}, {
   "name" : "Guildrun",
   "exePath" : "D:\\SteamLibrary\\steamapps\\common\\Guildrun Demo\\Guildrun.exe",
   "lastUsed" : "2026-07-26T09:29:03.254464",
   "activePreset" : null,
-  "languagePair" : "EN/VI"
-}, {
-  "name" : "Duckov",
-  "exePath" : "D:\\G\\EFD.v2.3.30_LinkNeverDie.Com\\Duckov.exe",
-  "lastUsed" : "2026-07-24T23:36:35.9614756",
-  "activePreset" : "ban_sung,sinh_ton",
   "languagePair" : "EN/VI"
 }, {
   "name" : "Underchoice",
