@@ -104,6 +104,17 @@ public class ActionsZoneCard extends VBox {
         List<GameHistoryManager.GameEntry> histEntries = GameHistoryManager.load();
         Node presetContainer = buildPresetSelector(savedGamePath, histEntries);
 
+        // Auto-initialize TranslateExecutor with the startup game's parameters
+        if (!savedGamePath.isEmpty()) {
+            translateExecutor.setActiveGamePath(savedGamePath);
+            String gameName = new File(savedGamePath).getName();
+            if (gameName.endsWith(".exe")) {
+                gameName = gameName.substring(0, gameName.length() - 4);
+            }
+            File gameCache = new File("data/cache_" + gameName + ".json");
+            translateExecutor.setActiveCacheFile(gameCache);
+        }
+
         // 5. BepInEx Utilities Box
         Node shortcutContainer = buildUtilitiesSection();
 
@@ -185,12 +196,14 @@ public class ActionsZoneCard extends VBox {
         flushPendingPresetSave();
         if (path == null || path.trim().isEmpty()) {
             translateExecutor.setActiveCacheFile(null);
+            translateExecutor.setActiveGamePath(null);
             if (onCacheChange != null)
                 onCacheChange.run();
             return;
         }
         String trimmed = path.trim();
         GameHistoryManager.upsert(trimmed);
+        translateExecutor.setActiveGamePath(trimmed);
 
         // Refresh combo items (newest-first) and re-select
         updatingCombo = true;

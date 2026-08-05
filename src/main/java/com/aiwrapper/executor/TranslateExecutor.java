@@ -35,6 +35,7 @@ public class TranslateExecutor implements BaseExecutor {
     private Map<String, String> cachedGlossaryMap = null;
     private long lastGlossaryMtime = -1;
     private String activePresetName = null;
+    private String activeGamePath = null;
 
     private Map<String, String> cachedResolvedGlossary = null;
     private String lastResolvedPresetSpec = "";
@@ -964,17 +965,20 @@ public class TranslateExecutor implements BaseExecutor {
     }
 
     private String getGameName() {
-        com.aiwrapper.config.AppConfig config = com.aiwrapper.config.AppConfigManager.load();
-        if (config != null) {
-            String gamePath = config.getActiveGamePath();
-            if (gamePath != null && !gamePath.trim().isEmpty()) {
-                File exeFile = new File(gamePath.trim());
-                String gameName = exeFile.getName();
-                if (gameName.endsWith(".exe")) {
-                    gameName = gameName.substring(0, gameName.length() - 4);
-                }
-                return gameName;
+        String path = this.activeGamePath;
+        if (path == null || path.trim().isEmpty()) {
+            com.aiwrapper.config.AppConfig config = com.aiwrapper.config.AppConfigManager.load();
+            if (config != null) {
+                path = config.getActiveGamePath();
             }
+        }
+        if (path != null && !path.trim().isEmpty()) {
+            File exeFile = new File(path.trim());
+            String gameName = exeFile.getName();
+            if (gameName.endsWith(".exe")) {
+                gameName = gameName.substring(0, gameName.length() - 4);
+            }
+            return gameName;
         }
         return null;
     }
@@ -1317,6 +1321,15 @@ public class TranslateExecutor implements BaseExecutor {
 
     public String getActivePreset() {
         return activePresetName;
+    }
+
+    public void setActiveGamePath(String activeGamePath) {
+        this.activeGamePath = (activeGamePath == null || activeGamePath.trim().isEmpty()) ? null
+                : activeGamePath.trim();
+    }
+
+    public String getActiveGamePath() {
+        return activeGamePath;
     }
 
     public Map<String, String> loadGlossaryMap() {
