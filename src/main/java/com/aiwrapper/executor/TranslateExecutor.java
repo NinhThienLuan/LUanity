@@ -28,6 +28,7 @@ public class TranslateExecutor implements BaseExecutor {
 
     private TranslationListener listener;
     private File activeCacheFile = null;
+    private static final Object cacheLock = new Object();
 
     // Glossary/Preset thread-safe caching and resolution state
     private final ReentrantReadWriteLock glossaryLock = new ReentrantReadWriteLock();
@@ -49,6 +50,10 @@ public class TranslateExecutor implements BaseExecutor {
 
     public void setActiveCacheFile(File activeCacheFile) {
         this.activeCacheFile = activeCacheFile;
+    }
+
+    public void setBatchQueue(TranslationBatchQueue batchQueue) {
+        this.batchQueue = batchQueue;
     }
 
     private final AiProviderFactory aiFactory;
@@ -151,12 +156,14 @@ public class TranslateExecutor implements BaseExecutor {
         File activeCache = activeCacheFile;
         File gameCacheFile = null;
         if (activeCache != null && activeCache.exists()) {
+            gameCacheFile = activeCache;
             try {
-                Map<String, String> loadedActiveCache = mapper.readValue(activeCache,
-                        new TypeReference<Map<String, String>>() {
-                        });
-                cacheMap.putAll(loadedActiveCache);
-                gameCacheFile = activeCache;
+                if (activeCache.length() > 0) {
+                    Map<String, String> loadedActiveCache = mapper.readValue(activeCache,
+                            new TypeReference<Map<String, String>>() {
+                            });
+                    cacheMap.putAll(loadedActiveCache);
+                }
             } catch (Exception e) {
                 // Ignore
             }
@@ -255,17 +262,33 @@ public class TranslateExecutor implements BaseExecutor {
                     return java.util.concurrent.CompletableFuture.completedFuture(restored);
                 })
                 .thenApply(restoredValue -> {
+                    System.out.println(
+                            "THEN_APPLY: key=" + text + ", val=" + restoredValue + ", file=" + finalGameCacheFile);
                     if (!isInvalidTranslation(text, restoredValue)) {
-                        finalCacheMap.put(text, restoredValue);
                         if (finalGameCacheFile != null) {
-                            try {
-                                File parent = finalGameCacheFile.getParentFile();
-                                if (parent != null && !parent.exists()) {
-                                    parent.mkdirs();
+                            synchronized (cacheLock) {
+                                try {
+                                    System.out.println("WRITE_CACHE: " + finalGameCacheFile.getAbsolutePath());
+                                    Map<String, String> curCache = new java.util.HashMap<>();
+                                    if (finalGameCacheFile.exists() && finalGameCacheFile.length() > 0) {
+                                        try {
+                                            curCache = mapper.readValue(finalGameCacheFile,
+                                                    new TypeReference<Map<String, String>>() {
+                                                    });
+                                        } catch (Exception ignored) {
+                                        }
+                                    }
+                                    curCache.put(text, restoredValue);
+                                    File parent = finalGameCacheFile.getParentFile();
+                                    if (parent != null && !parent.exists()) {
+                                        parent.mkdirs();
+                                    }
+                                    mapper.writerWithDefaultPrettyPrinter().writeValue(finalGameCacheFile, curCache);
+                                    System.out.println("WRITE_SUCCESS: " + finalGameCacheFile.length() + " bytes");
+                                } catch (Exception ex) {
+                                    System.err.println("WRITE_FAILED: " + ex.getMessage());
+                                    ex.printStackTrace();
                                 }
-                                mapper.writerWithDefaultPrettyPrinter().writeValue(finalGameCacheFile, finalCacheMap);
-                            } catch (Exception ex) {
-                                // Ignore
                             }
                         }
                     }
@@ -275,6 +298,8 @@ public class TranslateExecutor implements BaseExecutor {
                     }
                     return restoredValue;
                 }).exceptionally(ex -> {
+                    System.err.println("FUTURE_EXCEPTION: " + ex.getMessage());
+                    ex.printStackTrace();
                     if (listener != null) {
                         listener.onTranslation(text, "[ERROR] " + ex.getMessage(), "AI_Error", text.length());
                     }
@@ -761,20 +786,23 @@ public class TranslateExecutor implements BaseExecutor {
             // Save Hybrid Cache
             try {
                 if (gameCacheFile != null && !skipCacheWrite) {
-                    Map<String, String> gameCacheMap = new java.util.HashMap<>();
-                    if (gameCacheFile.exists()) {
-                        try {
-                            gameCacheMap = mapper.readValue(gameCacheFile, new TypeReference<Map<String, String>>() {
-                            });
-                        } catch (Exception e) {
+                    synchronized (cacheLock) {
+                        Map<String, String> gameCacheMap = new java.util.HashMap<>();
+                        if (gameCacheFile.exists() && gameCacheFile.length() > 0) {
+                            try {
+                                gameCacheMap = mapper.readValue(gameCacheFile,
+                                        new TypeReference<Map<String, String>>() {
+                                        });
+                            } catch (Exception e) {
+                            }
                         }
+                        gameCacheMap.put(text, translated);
+                        File parentDir = gameCacheFile.getParentFile();
+                        if (parentDir != null && !parentDir.exists()) {
+                            parentDir.mkdirs();
+                        }
+                        mapper.writerWithDefaultPrettyPrinter().writeValue(gameCacheFile, gameCacheMap);
                     }
-                    gameCacheMap.put(text, translated);
-                    File parentDir = gameCacheFile.getParentFile();
-                    if (parentDir != null && !parentDir.exists()) {
-                        parentDir.mkdirs();
-                    }
-                    mapper.writerWithDefaultPrettyPrinter().writeValue(gameCacheFile, gameCacheMap);
                 }
             } catch (Exception e) {
                 // Ignore
@@ -892,7 +920,9 @@ public class TranslateExecutor implements BaseExecutor {
                 // Sync active cache file, language pair, presets from game history
                 String gameName = getGameName();
                 if (gameName != null && !gameName.isEmpty()) {
-                    this.activeCacheFile = new File("data/cache_" + gameName + ".json");
+                    if (this.activeCacheFile == null) {
+                        this.activeCacheFile = new File("data/cache_" + gameName + ".json");
+                    }
 
                     // Read game_history.json for presets and language pair
                     File historyFile = new File("data/game_history.json");

@@ -214,22 +214,32 @@ public class TagPreservationTest {
         java.io.File tempFile = java.io.File.createTempFile("concurrent-cache-test", ".json");
         tempFile.deleteOnExit();
 
-        TranslateExecutor executor = new TranslateExecutor(
-                new com.aiwrapper.provider.AiProviderFactory(new com.aiwrapper.config.AiConfig()) {
+        com.aiwrapper.config.AiConfig aiConfig = new com.aiwrapper.config.AiConfig();
+        aiConfig.setProvider("ollama");
+
+        com.aiwrapper.provider.AiProviderFactory aiFactory = new com.aiwrapper.provider.AiProviderFactory(aiConfig) {
+            @Override
+            public com.aiwrapper.provider.AiProvider get() {
+                return new com.aiwrapper.provider.AiProvider() {
                     @Override
-                    public com.aiwrapper.provider.AiProvider get() {
-                        return new com.aiwrapper.provider.AiProvider() {
-                            @Override
-                            public String complete(String prompt, java.util.Map<String, Object> options) {
-                                try {
-                                    Thread.sleep(50);
-                                } catch (InterruptedException e) {
-                                }
-                                return "Translation"; // Mock translation
-                            }
-                        };
+                    public String complete(String prompt, java.util.Map<String, Object> options) {
+                        try {
+                            Thread.sleep(50);
+                        } catch (InterruptedException e) {
+                        }
+                        return "Translation"; // Mock translation
                     }
-                });
+                };
+            }
+        };
+
+        com.aiwrapper.provider.RateLimitBackoffHandler backoff = new com.aiwrapper.provider.RateLimitBackoffHandler(
+                aiConfig, aiFactory);
+        TranslationBatchQueue batchQueue = new TranslationBatchQueue(aiFactory, backoff);
+        batchQueue.init();
+
+        TranslateExecutor executor = new TranslateExecutor(aiFactory);
+        executor.setBatchQueue(batchQueue);
         executor.setActiveCacheFile(tempFile);
         executor.setLanguagePair("EN/VI");
 
@@ -247,10 +257,6 @@ public class TagPreservationTest {
         // Sleep to allow debounce flush scheduler to run
         Thread.sleep(800);
 
-        // Force call flushToDiskNow to run immediately in case scheduler is still
-        // waiting
-        // executor.flushToDiskNow(tempFile.getAbsolutePath(), tempFile);
-
         com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
         java.util.Map<String, String> cachedData = mapper.readValue(tempFile,
                 new com.fasterxml.jackson.core.type.TypeReference<java.util.Map<String, String>>() {
@@ -260,5 +266,48 @@ public class TagPreservationTest {
         for (int i = 0; i < threadCount; i++) {
             assertEquals("Translation", cachedData.get("Key_" + i));
         }
+    }
+
+    @Test
+    public void testKeyEchoBatchParsingRobustness() {
+        TranslationBatchQueue queue = new TranslationBatchQueue(null, null);
+
+        // Test recursive cleanKeyPart: markdown, bullets, index, quotes stripping
+        assertEquals("Options", queue.cleanKeyPart("Options"));
+        assertEquals("Options", queue.cleanKeyPart("- Options"));
+        assertEquals("Options", queue.cleanKeyPart("1. Options"));
+        assertEquals("Options", queue.cleanKeyPart("1. **Options**"));
+        assertEquals("Options", queue.cleanKeyPart("  *   _Options_   "));
+        assertEquals("Options", queue.cleanKeyPart("[3] \"Options\""));
+        assertEquals("Options", queue.cleanKeyPart("**\"Options\"**"));
+        assertEquals("Options", queue.cleanKeyPart("\"**Options**\""));
+
+        // Direct matching/symmetrical checks
+        assertEquals(queue.cleanKeyPart("- Option 1"), queue.cleanKeyPart("Option 1"));
+        assertEquals(queue.cleanKeyPart("1. **Option 1**"), queue.cleanKeyPart("\"Option 1\""));
+
+        // Safeguard checks: verify authentic data with leading indicators still cleans
+        // identically on both sides symmetrically
+        String origKeyWithDash = "- Settings";
+        String LLMEchoWithDash = "  - **Settings**  ";
+        assertEquals(queue.cleanKeyPart(origKeyWithDash), queue.cleanKeyPart(LLMEchoWithDash));
+
+        String origKeyWithNumber = "1. Item";
+        String LLMEchoWithNumber = "  1. **Item**  ";
+        assertEquals(queue.cleanKeyPart(origKeyWithNumber), queue.cleanKeyPart(LLMEchoWithNumber));
+
+        // Outer quotes only stripping vs internal dialogue quotes preservation
+        assertEquals("Dialogue: \"Hello there!\"", queue.cleanKeyPart("Dialogue: \"Hello there!\""));
+        assertEquals("Dialogue: \"Hello there!\"", queue.cleanKeyPart("\"Dialogue: \"Hello there!\"\""));
+        assertEquals("Dialogue: \"Hello there!\"", queue.cleanKeyPart("  **\"Dialogue: \"Hello there!\"\"**  "));
+
+        // cleanTranslationPart checks
+        System.out.println("DEBUG_ROBUSTNESS_T1_INPUT: " + "\"M\\u1EDD\"");
+        String debugCleaned = queue.cleanTranslationPart("\"M\u1EDD\"");
+        System.out.println("DEBUG_ROBUSTNESS_T1_CLEANED: " + debugCleaned);
+        assertEquals("M\u1EDD", queue.cleanTranslationPart("\"M\u1EDD\""));
+        assertEquals("M\u1EDD", queue.cleanTranslationPart("  **\"M\u1EDD\"**  "));
+        assertEquals("N\u00F3i: \"Xin ch\u00E0o\"", queue.cleanTranslationPart("\"N\u00F3i: \"Xin ch\u00E0o\"\""));
+        assertEquals("N\u00F3i: \"Xin ch\u00E0o\"", queue.cleanTranslationPart("N\u00F3i: \"Xin ch\u00E0o\""));
     }
 }

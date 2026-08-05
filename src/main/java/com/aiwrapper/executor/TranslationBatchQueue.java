@@ -199,13 +199,13 @@ public class TranslationBatchQueue implements InitializingBean {
                             int idx = line.indexOf("===");
                             String origPart = line.substring(0, idx).trim();
                             String transPart = line.substring(idx + 3).trim();
-                            if (origPart.startsWith("\"") && origPart.endsWith("\"") && origPart.length() >= 2) {
-                                origPart = origPart.substring(1, origPart.length() - 1);
-                            }
-                            if (transPart.startsWith("\"") && transPart.endsWith("\"") && transPart.length() >= 2) {
-                                transPart = transPart.substring(1, transPart.length() - 1);
-                            }
-                            String normKey = normalizeKey(origPart);
+
+                            // Robust outer tag cleaning for translation
+                            transPart = cleanTranslationPart(transPart);
+
+                            // Clean the echoed original key symmetrically
+                            String cleanedOrig = cleanKeyPart(origPart);
+                            String normKey = normalizeKey(cleanedOrig);
                             resultsMap.computeIfAbsent(normKey, k -> new ArrayList<>()).add(transPart.trim());
                         }
                     }
@@ -214,7 +214,9 @@ public class TranslationBatchQueue implements InitializingBean {
                     List<QueueItem> failedItems = new ArrayList<>();
 
                     for (QueueItem item : batch) {
-                        String normKey = normalizeKey(item.preservedText);
+                        // Symmetrically clean the original lookup key
+                        String cleanedItemText = cleanKeyPart(item.preservedText);
+                        String normKey = normalizeKey(cleanedItemText);
                         List<String> transList = resultsMap.get(normKey);
                         int useIdx = usageMap.getOrDefault(normKey, 0);
                         if (transList != null && useIdx < transList.size()) {
@@ -255,6 +257,98 @@ public class TranslationBatchQueue implements InitializingBean {
             return "";
         String clean = key.replaceAll("[\\uFEFF\\u200B\\u200C\\u200D\\u200E\\u200F\\u2070-\\u209F]", "");
         return clean.trim().toLowerCase();
+    }
+
+    /**
+     * Clean echoed original keys symmetrically. Recursive loop to unpack nested
+     * markers.
+     */
+    public String cleanKeyPart(String key) {
+        if (key == null) {
+            return "";
+        }
+        String current = key.trim();
+        boolean changed = true;
+
+        while (changed) {
+            String prev = current;
+
+            // 1. Strip outer matching quotes only
+            if (current.length() >= 2) {
+                char first = current.charAt(0);
+                char last = current.charAt(current.length() - 1);
+                if ((first == '"' && last == '"') ||
+                        (first == '\'' && last == '\'') ||
+                        (first == '“' && last == '”') ||
+                        (first == '‘' && last == '’') ||
+                        (first == '«' && last == '»')) {
+                    current = current.substring(1, current.length() - 1).trim();
+                }
+            }
+
+            // 2. Strip leading numbers, list/bullet markers, dashes (e.g., "1. ", "- ",
+            // "[1] ")
+            String stripped = current.replaceAll(
+                    "^(?i)(?:[0-9]+(?:\\.[0-9]+)*[\\.\\)\\s:-]+|[\\[\\(][0-9]+[\\]\\)][\\s:-]*|[-*+•]+[\\s:-]+)", "");
+            if (!stripped.equals(current)) {
+                current = stripped.trim();
+            }
+
+            // 3. Strip outer markdown bold, italic, code formatting (e.g. "**Word**" ->
+            // "Word")
+            if (current.startsWith("**") && current.endsWith("**") && current.length() > 4) {
+                current = current.substring(2, current.length() - 2).trim();
+            } else if (current.startsWith("*") && current.endsWith("*") && current.length() > 2) {
+                current = current.substring(1, current.length() - 1).trim();
+            } else if (current.startsWith("_") && current.endsWith("_") && current.length() > 2) {
+                current = current.substring(1, current.length() - 1).trim();
+            } else if (current.startsWith("`") && current.endsWith("`") && current.length() > 2) {
+                current = current.substring(1, current.length() - 1).trim();
+            }
+
+            changed = !current.equals(prev);
+        }
+        return current;
+    }
+
+    /**
+     * Clean translation part - strip outer quotes/bolding safely without breaking
+     * internal quotes.
+     */
+    public String cleanTranslationPart(String trans) {
+        if (trans == null) {
+            return "";
+        }
+        String current = trans.trim();
+
+        boolean changed = true;
+        while (changed) {
+            String before = current;
+
+            // Strip outer quotes if matched
+            if (current.length() >= 2) {
+                char first = current.charAt(0);
+                char last = current.charAt(current.length() - 1);
+                if ((first == '"' && last == '"') ||
+                        (first == '\'' && last == '\'') ||
+                        (first == '“' && last == '”') ||
+                        (first == '«' && last == '»')) {
+                    current = current.substring(1, current.length() - 1).trim();
+                }
+            }
+
+            // Strip outer markdown
+            if (current.startsWith("**") && current.endsWith("**") && current.length() > 4) {
+                current = current.substring(2, current.length() - 2).trim();
+            } else if (current.startsWith("*") && current.endsWith("*") && current.length() > 2) {
+                current = current.substring(1, current.length() - 1).trim();
+            } else if (current.startsWith("`") && current.endsWith("`") && current.length() > 2) {
+                current = current.substring(1, current.length() - 1).trim();
+            }
+
+            changed = !current.equals(before);
+        }
+        return current;
     }
 
     private void fallbackTranslateIndividually(List<QueueItem> batch) {
