@@ -61,9 +61,6 @@ public class AutoTranslatorConfigWriter {
             }
 
             Files.write(configFile.toPath(), output, StandardCharsets.UTF_8);
-            System.out.println(
-                    "[AutoTranslatorConfigWriter] Updated AutoTranslatorConfig.ini language pair: " + fromLang + " -> "
-                            + targetLang);
         } catch (Exception ex) {
             System.err.println(
                     "[AutoTranslatorConfigWriter] Failed to update AutoTranslatorConfig.ini: " + ex.getMessage());
@@ -138,8 +135,6 @@ public class AutoTranslatorConfigWriter {
             }
 
             Files.write(configFile.toPath(), output, StandardCharsets.UTF_8);
-            System.out.println(
-                    "[AutoTranslatorConfigWriter] Updated AutoTranslatorConfig.ini endpoint to: " + targetEndpoint);
         } catch (Exception ex) {
             System.err.println("[AutoTranslatorConfigWriter] Failed to update AutoTranslatorConfig.ini endpoint: "
                     + ex.getMessage());

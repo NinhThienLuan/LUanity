@@ -926,26 +926,34 @@ public class TranslateExecutor implements BaseExecutor {
 
                     // Read game_history.json for presets and language pair
                     File historyFile = new File("data/game_history.json");
+                    String foundPreset = null;
+                    String foundLangPair = "EN/VI";
                     if (historyFile.exists()) {
-                        ObjectMapper mapper = new ObjectMapper();
-                        List<Map<String, Object>> games = mapper.readValue(historyFile,
-                                new TypeReference<List<Map<String, Object>>>() {
-                                });
-                        for (Map<String, Object> game : games) {
-                            String name = String.valueOf(game.get("name"));
-                            if (gameName.equalsIgnoreCase(name)) {
-                                Object lpObj = game.get("languagePair");
-                                if (lpObj != null) {
-                                    setLanguagePair(String.valueOf(lpObj));
+                        try {
+                            ObjectMapper mapper = new ObjectMapper();
+                            List<Map<String, Object>> games = mapper.readValue(historyFile,
+                                    new TypeReference<List<Map<String, Object>>>() {
+                                    });
+                            for (Map<String, Object> game : games) {
+                                String name = String.valueOf(game.get("name"));
+                                if (gameName.equalsIgnoreCase(name)) {
+                                    Object lpObj = game.get("languagePair");
+                                    if (lpObj != null) {
+                                        foundLangPair = String.valueOf(lpObj);
+                                    }
+                                    Object prObj = game.get("activePreset");
+                                    if (prObj != null) {
+                                        foundPreset = String.valueOf(prObj);
+                                    }
+                                    break;
                                 }
-                                Object prObj = game.get("activePreset");
-                                if (prObj != null) {
-                                    setActivePreset(String.valueOf(prObj));
-                                }
-                                break;
                             }
+                        } catch (Exception ex) {
+                            // ignore, fallback to default
                         }
                     }
+                    setActivePreset(foundPreset);
+                    setLanguagePair(foundLangPair);
                 } else {
                     this.activeCacheFile = new File("data/cache_default.json");
                 }
