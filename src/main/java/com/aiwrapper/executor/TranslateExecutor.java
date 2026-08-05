@@ -17,6 +17,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Component
@@ -29,6 +34,16 @@ public class TranslateExecutor implements BaseExecutor {
     private TranslationListener listener;
     private File activeCacheFile = null;
     private static final Object cacheLock = new Object();
+
+    // P0: Batch cache commit — buffer writes in RAM, flush to disk with 3s debounce
+    private final ConcurrentHashMap<String, String> pendingCacheEntries = new ConcurrentHashMap<>();
+    private final ScheduledExecutorService cacheFlushScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "CacheFlushScheduler");
+        t.setDaemon(true);
+        return t;
+    });
+    private volatile ScheduledFuture<?> pendingFlush = null;
+    private volatile File pendingCacheFile = null;
 
     // Glossary/Preset thread-safe caching and resolution state
     private final ReentrantReadWriteLock glossaryLock = new ReentrantReadWriteLock();
@@ -263,34 +278,11 @@ public class TranslateExecutor implements BaseExecutor {
                     return java.util.concurrent.CompletableFuture.completedFuture(restored);
                 })
                 .thenApply(restoredValue -> {
-                    System.out.println(
-                            "THEN_APPLY: key=" + text + ", val=" + restoredValue + ", file=" + finalGameCacheFile);
                     if (!isInvalidTranslation(text, restoredValue)) {
                         if (finalGameCacheFile != null) {
-                            synchronized (cacheLock) {
-                                try {
-                                    System.out.println("WRITE_CACHE: " + finalGameCacheFile.getAbsolutePath());
-                                    Map<String, String> curCache = new java.util.HashMap<>();
-                                    if (finalGameCacheFile.exists() && finalGameCacheFile.length() > 0) {
-                                        try {
-                                            curCache = mapper.readValue(finalGameCacheFile,
-                                                    new TypeReference<Map<String, String>>() {
-                                                    });
-                                        } catch (Exception ignored) {
-                                        }
-                                    }
-                                    curCache.put(text, restoredValue);
-                                    File parent = finalGameCacheFile.getParentFile();
-                                    if (parent != null && !parent.exists()) {
-                                        parent.mkdirs();
-                                    }
-                                    mapper.writerWithDefaultPrettyPrinter().writeValue(finalGameCacheFile, curCache);
-                                    System.out.println("WRITE_SUCCESS: " + finalGameCacheFile.length() + " bytes");
-                                } catch (Exception ex) {
-                                    System.err.println("WRITE_FAILED: " + ex.getMessage());
-                                    ex.printStackTrace();
-                                }
-                            }
+                            // P0: Buffer entry in RAM and schedule a debounced flush to disk
+                            pendingCacheEntries.put(text, restoredValue);
+                            scheduleCacheFlush(finalGameCacheFile);
                         }
                     }
 
@@ -899,7 +891,49 @@ public class TranslateExecutor implements BaseExecutor {
                 "(?i)^[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*((kg|g|l|s|m|h|M|xp|exp|lv|lvl|v|hz|fps|ping|ms|am|pm|sec|min|hr|d|km|km/h|lbs|mph|ml|oz|px|pt|in|ft|yd)\\b[0-9\\s.,/:\\-+%*#()\\[\\]_xX=\"'<>!?;]*)*$");
     }
 
+    /**
+     * P0: Flush all pending cache entries to disk immediately.
+     * Called by the debounce scheduler or on demand.
+     */
+    private void scheduleCacheFlush(File cacheFile) {
+        pendingCacheFile = cacheFile;
+        if (pendingFlush != null && !pendingFlush.isDone()) {
+            pendingFlush.cancel(false);
+        }
+        pendingFlush = cacheFlushScheduler.schedule(() -> {
+            if (pendingCacheEntries.isEmpty())
+                return;
+            synchronized (cacheLock) {
+                try {
+                    Map<String, String> curCache = new java.util.HashMap<>();
+                    if (cacheFile.exists() && cacheFile.length() > 0) {
+                        try {
+                            curCache = new ObjectMapper().readValue(cacheFile,
+                                    new TypeReference<Map<String, String>>() {
+                                    });
+                        } catch (Exception ignored) {
+                        }
+                    }
+                    // Drain all pending entries at once
+                    curCache.putAll(pendingCacheEntries);
+                    pendingCacheEntries.clear();
+                    File parent = cacheFile.getParentFile();
+                    if (parent != null && !parent.exists())
+                        parent.mkdirs();
+                    new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(cacheFile, curCache);
+                } catch (Exception ex) {
+                    System.err.println("[Cache] Flush failed: " + ex.getMessage());
+                }
+            }
+        }, 500, TimeUnit.MILLISECONDS);
+    }
+
     private void syncFromDisk() {
+        // P1: Skip all disk reads when UI has already set activeGamePath +
+        // activeCacheFile in memory
+        if (this.activeGamePath != null && this.activeCacheFile != null) {
+            return;
+        }
         try {
             com.aiwrapper.config.AppConfig config = com.aiwrapper.config.AppConfigManager.load();
             if (config != null) {

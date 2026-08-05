@@ -108,6 +108,10 @@ public class TranslationBatchQueue implements InitializingBean {
 
                     batch.add(next);
                     totalChars += next.preservedText.length();
+
+                    // P2: Flush immediately when batch is full — no need to wait for timeout
+                    if (batch.size() >= maxItems)
+                        break;
                 }
 
                 if (!batch.isEmpty()) {
@@ -165,10 +169,18 @@ public class TranslationBatchQueue implements InitializingBean {
                         promptBuilder.append(batch.get(i).preservedText).append(" === \n");
                     }
 
+                    // P3: Smart Glossary Injection — only include terms present in batch text
+                    String batchText = batch.stream()
+                            .map(i -> i.preservedText)
+                            .collect(java.util.stream.Collectors.joining(" "));
                     Map<String, String> mergedGlossary = new LinkedHashMap<>();
                     for (QueueItem item : batch) {
                         if (item.glossary != null) {
-                            mergedGlossary.putAll(item.glossary);
+                            item.glossary.forEach((k, v) -> {
+                                if (batchText.toLowerCase().contains(k.toLowerCase())) {
+                                    mergedGlossary.put(k, v);
+                                }
+                            });
                         }
                     }
 
